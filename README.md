@@ -1,2 +1,2 @@
 # Scientific Computing
-Tadgh Jones, David Kraakman, Storm Koper
+Tadhg Jones, David Kraakman, Storm Koper
