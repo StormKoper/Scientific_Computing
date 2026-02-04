@@ -7,7 +7,7 @@ def run_wave():
     x0 = np.sin(2*np.pi*x0)
 
     mywave = Wave1D(x0, 0.001, 0.01, c=1.0)
-    mywave.run(100)
+    mywave.run(1000)
 
     return mywave.x_arr
 

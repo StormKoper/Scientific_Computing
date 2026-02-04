@@ -7,7 +7,7 @@ class GeneralWave():
         self.dt = dt
         self.constants = dict()
         self.save_every = save_every
-        self.x_arr = x0.copy()
+        self.x_arr = x0.astype(np.float16).copy()
 
     def _first_step(self):
         """This completse the first step based on single sided scheme"""
@@ -22,23 +22,25 @@ class GeneralWave():
         for n in range(n_iters):
             self._update_func()
             if self.save_every and (n % self.save_every == 0):
-                self.x_arr = np.vstack((self.x_arr, self.x.copy()))
+                self.x_arr = np.vstack((self.x_arr, self.x.astype(np.float16).copy()))
 
 
 class Wave1D(GeneralWave):
     """1D wave equation solver using finite difference method"""
-    def __init__(self, x0, dt, dx, c: float = 1.0):
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, c: float = 1.0):
         super().__init__(x0, dt, dx)
         self.constants["C^2"] = (c*(dt/dx))**2
         self._first_step()
 
     def _first_step(self):
         self.x_prev = self.x
-        self.x[1:-2] = self.constants['C^2'] \
+        self.x[1:-2] = 0.5 * self.constants['C^2'] \
             * (self.x[0:-3] - 2*self.x[1:-2] + self.x[2:-1]) \
                 + self.x[1:-2]
-            
+    
     def _update_func(self):
-        self.x[1:-2] = self.constants['C^2'] \
+        x_next = self.constants['C^2'] \
             * (self.x[0:-3] - 2*self.x[1:-2] + self.x[2:-1]) \
                 - self.x_prev[1:-2] + 2*self.x[1:-2]
+        self.x_prev = self.x.copy()
+        self.x[1:-2] = x_next
