@@ -16,4 +16,5 @@ if __name__ == "__main__":
         plt.imshow(mywave.x_arr, aspect='auto', cmap='viridis')
         plt.colorbar(label='Wave Amplitude')
         plt.title('Initial Condition: ' + (i+1)*'i')
+        plt.savefig(f'set_1/results/wave_{(i+1)*"i"}.png')
         plt.show()
