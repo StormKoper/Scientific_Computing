@@ -1,4 +1,5 @@
 import numpy as np
+from warnings import warn
 
 class GeneralWave():
     """Base class for the wave equation solvers"""
@@ -22,13 +23,14 @@ class GeneralWave():
         for n in range(n_iters):
             self._update_func()
             if self.save_every and (n % self.save_every == 0):
-                self.x_arr = np.concatenate((self.x_arr, self.x.astype(np.float16).copy()[..., None]), axis=-1)
+                new = self.x.astype(np.float16).copy()[..., None]
+                self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
 
 
 class Wave1D(GeneralWave):
     """1D wave equation solver using finite difference method"""
-    def __init__(self, x0: np.ndarray, dt: float, dx: float, c: float = 1.0):
-        super().__init__(x0, dt, dx)
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, c: float = 1.0, save_every: int = 1):
+        super().__init__(x0, dt, dx, save_every)
         self.constants["C^2"] = (c*(dt/dx))**2
         self._first_step()
 
@@ -47,17 +49,17 @@ class Wave1D(GeneralWave):
 
 class Wave2D(GeneralWave):
     """2D wave equation solver using finite difference method"""
-    def __init__(self, x0: np.ndarray, dt: float, dx: float, D: float = 1.0):
-        super().__init__(x0, dt, dx)
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, D: float = 1.0, save_every: int = 1):
+        super().__init__(x0, dt, dx, save_every)
         self.constants["d"] = (dt*D) / (dx**2)
         if self.constants["d"] >= 0.25:
             raise ValueError("The scheme is unstable for d >= 0.25. Choose smaller dt. Currently d = " + str(self.constants["d"]))
         elif self.constants["d"] >= 0.2:
-            raise Warning("The scheme is close to the stability limit. Consider smaller dt for better results. Currently d = " + str(self.constants["d"]))
+            warn("The scheme is close to the stability limit. Consider smaller dt for better results. Currently d = " + str(self.constants["d"]))
     
     def _update_func(self):
-        x_next = self.x[:, 1:-1] + self.constants['d'] \
-            * (np.vstack([self.x[1:, 1:-1], self.x[1, 1:-1][None, :]]) \
-               + np.vstack([self.x[-2, 1:-1][None, :], self.x[:-1, 1:-1]]) \
-                + self.x[:, 2:] + self.x[:, :-2] - 4*self.x[:, 1:-1])
-        self.x[:, 1:-1] = x_next
+        x_next = self.x[1:-1, :] + self.constants['d'] \
+            * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+               + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
+                + self.x[2:, :] + self.x[:-2, :] - 4*self.x[1:-1, :])
+        self.x[1:-1, :] = x_next

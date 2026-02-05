@@ -22,44 +22,55 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "b_type",
+        "-b_type",
         help="The initial conditions for the wabe (e.g., i, ii, iii)",
         type=str,
+        default='i',
+        required=False,
     )
     parser.add_argument(
-        "steps",
+        "-steps",
         help="How many steps should be taken",
         type=int,
+        default=1000,
+        required=False,
     )
     parser.add_argument(
-        "-animate",
+        "-save_every",
+        help="How often should the wave be saved for plotting",
+        type=int,
+        default=1,
+        required=False,
+    )
+    parser.add_argument(
+        "--animate",
         help="Whether to make an animated plot or just heatmap",
         action="store_true"
     )
     return parser.parse_args()
 
-def animate_wave(x_s: np.ndarray,
-                 interval: int = 50,
+def animate_wave(x_arr: np.ndarray,
+                 interval: int = 10,
                  ) -> None:
     """Animate the wave.
     
     Args:
-        - x_s (np.ndarray): a 2D array (t, x), which has chronological amplitude values
-            in x stacked vertically.
-        - interval (int) = 50: The interval (in ms) between frames
+        - x_arr (np.ndarray): a 2D array (x, t), which has chronological amplitude values
+            in x stacked horizontally.
+        - interval (int) = 10: The interval (in ms) between frames
     
     """
-    if x_s.ndim != 2:
-        raise ValueError(f"array must be 2D (t, x), got {x_s.shape}")
+    if x_arr.ndim != 2:
+        raise ValueError(f"array must be 2D (x, t), got {x_arr.shape}")
 
-    fig = plt.figure( constrained_layout=True)
-    artist = plt.plot(x_s[0])[0]
+    fig = plt.figure(constrained_layout=True)
+    artist = plt.plot(x_arr[..., 0])[0]
     ax = plt.gca()
     ax.set_ylim((-1.2, 1.2))
 
     def update(frame_idx: int) -> tuple:
         """Update function that is required by FuncAnimation."""
-        artist.set_ydata(x_s[frame_idx])
+        artist.set_ydata(x_arr[..., frame_idx])
         
         return (artist,)
 
@@ -67,7 +78,7 @@ def animate_wave(x_s: np.ndarray,
     plt.xlabel("Space (x)")
     plt.ylabel("Amplitude")
 
-    anim = FuncAnimation(fig, update, frames=x_s.shape[0], interval=interval, blit=True)
+    anim = FuncAnimation(fig, update, frames=x_arr.shape[-1], interval=interval, blit=True)
     plt.show()
 
 def main():
@@ -76,6 +87,7 @@ def main():
     Expected CLI arguments:
         - b_type (str): denotes the type of initial conditions for the wave.
         - steps (int): the number of steps to take (delta t = 0.001).
+        - save_every (int): how often should the wave be saved for plotting.
         - '-animate' (OPTIONAL): flag to denot if animation should be made instead of heatmap."""
     args = parse_args()
 
@@ -85,13 +97,13 @@ def main():
     x0 = np.linspace(0, 1, 1000)
 
     if args.b_type == 'i':
-        x_s = np.sin(2*np.pi*x0)
+        x0 = np.sin(2*np.pi*x0)
     elif args.b_type == 'ii':
-        x_s = np.sin(5*np.pi*x0)
+        x0 = np.sin(5*np.pi*x0)
     else:
-        x_s = np.where((1/5 < x0) & (x0 < 2/5), np.sin(5*np.pi*x0), 0)
+        x0 = np.where((1/5 < x0) & (x0 < 2/5), np.sin(5*np.pi*x0), 0)
 
-    wave = Wave1D(x_s, 0.001, 0.001, c=1.0)
+    wave = Wave1D(x0, 0.001, 0.001, c=1.0, save_every=args.save_every)
 
     if args.animate:
         wave.run(args.steps)
@@ -102,8 +114,8 @@ def main():
 
         plt.imshow(wave.x_arr, aspect='auto', cmap='viridis')
         plt.colorbar(label='Wave Amplitude')
-        plt.ylabel('Time (t)')
-        plt.xlabel('Space (x)')
+        plt.ylabel('Space (x)')
+        plt.xlabel('Time (t)')
         plt.title(f'Initial Condition: {args.b_type}')
         plt.show()
 
