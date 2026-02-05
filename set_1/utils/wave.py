@@ -7,7 +7,7 @@ class GeneralWave():
         self.dt = dt
         self.constants = dict()
         self.save_every = save_every
-        self.x_arr = x0.astype(np.float16).copy()
+        self.x_arr = x0.astype(np.float16).copy()[..., None]
 
     def _first_step(self):
         """This completse the first step based on single sided scheme"""
@@ -22,7 +22,7 @@ class GeneralWave():
         for n in range(n_iters):
             self._update_func()
             if self.save_every and (n % self.save_every == 0):
-                self.x_arr = np.vstack((self.x_arr, self.x.astype(np.float16).copy()))
+                self.x_arr = np.concatenate((self.x_arr, self.x.astype(np.float16).copy()[..., None]), axis=-1)
 
 
 class Wave1D(GeneralWave):
