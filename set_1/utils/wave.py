@@ -34,13 +34,30 @@ class Wave1D(GeneralWave):
 
     def _first_step(self):
         self.x_prev = self.x
-        self.x[1:-2] = 0.5 * self.constants['C^2'] \
-            * (self.x[0:-3] - 2*self.x[1:-2] + self.x[2:-1]) \
-                + self.x[1:-2]
+        self.x[1:-1] = 0.5 * self.constants['C^2'] \
+            * (self.x[:-2] - 2*self.x[1:-1] + self.x[2:]) \
+                + self.x[1:-1]
     
     def _update_func(self):
         x_next = self.constants['C^2'] \
-            * (self.x[0:-3] - 2*self.x[1:-2] + self.x[2:-1]) \
-                - self.x_prev[1:-2] + 2*self.x[1:-2]
+            * (self.x[:-2] - 2*self.x[1:-1] + self.x[2:]) \
+                - self.x_prev[1:-1] + 2*self.x[1:-1]
         self.x_prev = self.x.copy()
-        self.x[1:-2] = x_next
+        self.x[1:-1] = x_next
+
+class Wave2D(GeneralWave):
+    """2D wave equation solver using finite difference method"""
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, D: float = 1.0):
+        super().__init__(x0, dt, dx)
+        self.constants["d"] = (dt*D) / (dx**2)
+        if self.constants["d"] >= 0.25:
+            raise ValueError("The scheme is unstable for d >= 0.25. Choose smaller dt. Currently d = " + str(self.constants["d"]))
+        elif self.constants["d"] >= 0.2:
+            raise Warning("The scheme is close to the stability limit. Consider smaller dt for better results. Currently d = " + str(self.constants["d"]))
+    
+    def _update_func(self):
+        x_next = self.x[:, 1:-1] + self.constants['d'] \
+            * (np.vstack([self.x[1:, 1:-1], self.x[1, 1:-1][None, :]]) \
+               + np.vstack([self.x[-2, 1:-1][None, :], self.x[:-1, 1:-1]]) \
+                + self.x[:, 2:] + self.x[:, :-2] - 4*self.x[:, 1:-1])
+        self.x[:, 1:-1] = x_next
