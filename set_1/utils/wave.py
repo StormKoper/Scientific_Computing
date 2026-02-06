@@ -1,10 +1,13 @@
-import numpy as np
 from warnings import warn
+
+import numpy as np
+
 
 class GeneralWave():
     """Base class for the wave equation solvers"""
     def __init__(self, x0: np.ndarray, dt: float, dx: float, save_every: int = 1):
         self.x = x0
+        self.dx = dx
         self.dt = dt
         self.constants = dict()
         self.save_every = save_every

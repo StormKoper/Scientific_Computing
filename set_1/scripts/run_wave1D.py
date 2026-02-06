@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
 
+from ..utils.config import *  # noqa: F403
 from ..utils.wave import Wave1D
 
 

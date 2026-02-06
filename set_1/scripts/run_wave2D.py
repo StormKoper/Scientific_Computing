@@ -1,15 +1,20 @@
-"""Contains the functions for creating the plots for 1.B and 1.C of the asssigmnent
+"""Contains the functions for creating the plots for questions E, F and G of Set 1.
 
 Course: Scientific Computing
 Team: 5
 """
 
 import argparse
+import itertools
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 
+from ..utils.config import *  # noqa: F403
+from ..utils.misc import analytical_concentration
 from ..utils.wave import Wave2D
 
 
@@ -22,68 +27,162 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "-steps",
-        help="How many steps should be taken",
-        type=int,
-        default=1000,
-        required=False,
-    )
-    parser.add_argument(
-        "-save_every",
-        help="How often should the wave be saved for plotting",
-        type=int,
-        default=1,
-        required=False,
+        "-question",
+        choices=["E", "F", "G"],
+        help="For which question you want to create a plot ['E', 'F', 'G']",
+        type=str,
+        required=True
     )
     return parser.parse_args()
 
-def animate_grid(x_arr: np.ndarray,
-                 interval: int = 10,
-                 ) -> None:
-    """Animate the wave.
-    
-    Args:
-        - x_arr (np.ndarray): a 3D array (x, y, t), which has chronological amplitude values
-            concatenated along time.
-        - interval (int) = 10: The interval (in ms) between frames
-    
+def plot_concentration() -> None:
+    """Create a figure for showing numerical vs. analytical concentrations at various timesteps.
+
+    Runs a 2D concentration diffusion scheme where top row is initialised and fixed at C=1. Will
+    run numeric diffusion and plot concentration of single y-slice at t=[1.0, 0.1, 0.01, 0.001].
+    Additionally, since for this specific initialization an analytical solution exists, this will
+    be plotted as well.
     """
-    if x_arr.ndim != 3:
-        raise ValueError(f"array must be 3D (x, y, t), got {x_arr.shape}")
+    N = 25
+    t_s = [1.0, 0.1, 0.01, 0.001]
+    dx = 1.0 / (N-1)
+    dt = 0.15 * dx**2 / 1.0 #dt so that d=0.15 for stability
+
+    # init wave
+    x0 = np.zeros((N, N))
+    x0[0, :] = 1
+    wave = Wave2D(x0, dt, dx, D=1.0, save_every=1)
+
+    # run for required steps
+    total_steps = int(np.ceil(max(t_s) / wave.dt))
+    wave.run(total_steps)
+
+    # init figure and create cmap
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10,6), constrained_layout=True)
+    mpl_cmap = mpl.colormaps['viridis']
+
+    colors = mpl_cmap(np.linspace(0, 1, len(t_s)))
+    custom_cmap = ListedColormap(colors)
+
+    for i, t in enumerate(t_s):
+        t_index = round(t / wave.dt)
+        true_t = t_index * wave.dt
+
+        concentration_slice = wave.x_arr[::-1, 1, t_index]
+        y_vals = np.linspace(0, 1, N, dtype=float)
+        ax1.plot(y_vals, concentration_slice, 
+                 linestyle="-", c=custom_cmap(i), label=f"t: {true_t:.4f}")
+        
+        ax2.plot(y_vals, [analytical_concentration(y, true_t, 1, 1000) for y in y_vals], 
+                 linestyle="-", c=custom_cmap(i), label=f"t: {true_t:.4f}")
+
+    ax1.set_xlabel("y-value")
+    ax1.set_ylabel("Concentration (C)")
+    ax1.set_title("Numerical Obtained Concentrations")
+    ax1.legend(shadow=True, fancybox=True)
+
+    ax2.set_xlabel("y-value")
+    ax2.set_ylabel("Concentration (C)")
+    ax2.set_title("Analytical Obtained Concentrations")
+    ax2.legend(shadow=True, fancybox=True)
+
+    plt.suptitle(f"Numerical vs. Analytical Concentration at Various Time Steps ({N}x{N}-grid)")
+    plt.show()
+
+def plot_states() -> None:
+    """Create a figure with heatmaps for 2D diffusion at various time steps.
+
+    Runs a 2D diffusion scheme on an NxN grid with the top row fixed at C=1
+    (periodic boundary). Plots heatmaps at t = [0, 0.001, 0.01, 0.1, 1.0].
+    """
+    N = 25
+    t_s = [0, 0.001, 0.01, 0.1, 1.0]
+    dx = 1.0 / (N-1)
+    dt = 0.15 * dx**2 / 1.0 #dt so that d=0.15 for stability
+
+    # init wave
+    x0 = np.zeros((N, N))
+    x0[-1, :] = 1
+    wave = Wave2D(x0, dt, dx, D=1.0, save_every=1)
+
+    # run for required steps
+    total_steps = int(np.ceil(max(t_s) / wave.dt))
+    wave.run(total_steps)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
+    
+    for ax, t in itertools.zip_longest(axes.flatten(), t_s):
+        if t is None:
+            ax.set_visible(False)
+            continue
+        t_index = round(t / wave.dt)
+        true_t = t_index * wave.dt
+
+        im = ax.imshow(wave.x_arr[..., t_index], origin="lower")
+        ax.set_title(f"t={true_t:.4f}")
+        ax.set_ylabel("y")
+        ax.set_xlabel("x")
+    
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8)
+    plt.suptitle("2D Heatmap of Concentration Values at Various Time Steps")
+    plt.show()
+
+def animate_grid() -> None:
+    """Animate the 2D concentration diffusion as a heatmap over time.
+
+    Runs a 2D diffusion scheme on an NxN grid with the top row fixed at C=1
+    and animates the result from t=0 to t=1 using ``FuncAnimation``.
+    """
+    N = 25
+    dx = 1.0 / (N-1)
+    dt = 0.15 * dx**2 / 1.0 #dt s.t. d=0.15 for stability
+
+    # init wave
+    x0 = np.zeros((N, N))
+    x0[-1, :] = 1
+    wave = Wave2D(x0, dt, dx, D=1.0, save_every=1)
+
+    # run to t=1
+    total_steps = int(np.ceil(1 / wave.dt))
+    wave.run(total_steps)
 
     fig = plt.figure(constrained_layout=True)
-    artist = plt.imshow(x_arr[..., 0])
+    artist = plt.imshow(wave.x_arr[..., 0], origin="lower")
     ax = plt.gca()
     ax.set_aspect('equal')
+    title = ax.set_title("Wave Animation (t = 0.0000)")
 
     def update(frame_idx: int) -> tuple:
         """Update function that is required by FuncAnimation."""
-        artist.set_data(x_arr[..., frame_idx])
+        artist.set_data(wave.x_arr[..., frame_idx])
+        title.set_text(f"Wave Animation (t = {frame_idx * dt:.4f})")
         
-        return (artist,)
+        return (artist, title)
 
     plt.title("Wave Animation")
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
 
-    anim = FuncAnimation(fig, update, frames=x_arr.shape[-1], interval=interval, blit=True)
+    _ = FuncAnimation(fig, update, frames=wave.x_arr.shape[-1], interval=1, blit=False)
     plt.show()
 
 def main():
-    """The entry point when run as a script.
-    
-    Expected CLI arguments:
-        - steps (int): the number of steps to take (delta t = 0.0001).
-        - save_every (int): how often should the wave be saved for plotting.
-        - '-animate' (OPTIONAL): flag to denot if animation should be made instead of heatmap."""
-    args = parse_args()
-    
-    x0 = np.zeros((25, 25))
-    x0[0, :] = 1
+    """Entry point when run as a script.
 
-    wave = Wave2D(x0, 0.0001, 0.04, D=1.0, save_every=args.save_every)
-    wave.run(args.steps)
-    animate_grid(wave.x_arr, interval=10)
+    CLI arguments:
+        -question (str): One of 'E', 'F', or 'G'.
+            - E: plot numerical vs. analytical concentration profiles.
+            - F: plot 2D heatmaps at various time steps.
+            - G: animate the 2D diffusion over time.
+    """
+    args = parse_args()
+
+    if args.question == 'E':
+        plot_concentration()
+    elif args.question == 'F':
+        plot_states()
+    else:
+        animate_grid()
 
 if __name__ == "__main__":
     main()
