@@ -1,3 +1,4 @@
+# imports
 import matplotlib.pyplot as plt
 
 # setup global style of plotting
