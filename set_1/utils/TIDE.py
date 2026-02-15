@@ -6,27 +6,42 @@ class general_TIDE():
     def __init__(self, x0: np.ndarray, save_every: int = 1):
         self.x = x0
         self.constants = dict()
-        self.epsilon = dict()
+
         self.save_every = save_every
         self.x_arr = x0.astype(np.float16).copy()[..., None]
+        
+        self.iter_count = 0
+        self.error_history = [] 
 
     def _update_func(self):
         """Should contain the logic to update the x by one step"""
         raise(NotImplementedError)
        
-    def stopping_crit(self, x_old):
+    def max_error(self, x_old):
         """Stopping criterion for iterative functions"""
-        return np.max(np.abs(self.x - x_old)) < self.epsilon
+        return np.max(np.abs(self.x - x_old))
     
-    def run(self, n_iters: int):
-        """Advances the grid by one step"""
-        for n in range(n_iters):
-            x_old = self.x.copy()
-            self._update_func()
-            if self.save_every and (n % self.save_every == 0):
-                new = self.x.astype(np.float16).copy()[..., None]
-                self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
+    def _step(self):
+        """Perform a step and save error to error_history"""
+        x_old = self.x.copy()
+        self._update_func()
+        self.iter_count += 1
+        
+        # error history
+        error = np.max(np.abs(self.x - x_old))
+        self.error_history.append(error)
 
+        # saving logic
+        if self.save_every and (self.iter_count % self.save_every == 0):
+             new = self.x.copy()[..., None]
+             self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
+        
+        return error
+
+    def run(self, n_iters: int, epsilon: float|None = None): 
+        for _ in range(n_iters):
+            self._step()
+    
 class Jacobi(general_TIDE):
     """Jacobi Iteration Function"""
     def __init__(self, x0: np.ndarray, save_every: int = 1):

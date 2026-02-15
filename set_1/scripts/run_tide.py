@@ -29,13 +29,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 def plot_itermethods_vs_analytical() -> None:
-    """Create a figure for showing numerical vs. analytical concentrations at various timesteps.
-
-    Runs a 2D concentration diffusion scheme where top row is initialised and fixed at C=1. Will
-    run numeric diffusion and plot concentration of single y-slice at t=[1.0, 0.1, 0.01, 0.001].
-    Additionally, since for this specific initialization an analytical solution exists, this will
-    be plotted as well.
-    """
+    """Create a figure for showing 3 iteration methods vs Analytical solution."""
     N = 50
     x0 = np.zeros((N, N))
     x0[0, :] = 1
@@ -69,12 +63,10 @@ def plot_itermethods_vs_analytical() -> None:
         S_slice = S.x_arr[::-1, 1, iter]
         ax3.plot(y_vals, S_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
     
-    ax1.plot(y_vals, y_vals, 
-                 linestyle=":", c='black', label="Analytical Sol")
-    ax2.plot(y_vals, y_vals, 
-                 linestyle=":", c='black', label="Analytical Sol")
-    ax3.plot(y_vals, y_vals, 
-                 linestyle=":", c='black', label="Analytical Sol")
+    # solving the time-independent diffusion equation, is just a line
+    ax1.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
+    ax2.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
+    ax3.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
     
     ax1.set_title("Jacobi Iteration")
     ax1.set_xlabel("y-value")
@@ -94,22 +86,67 @@ def plot_itermethods_vs_analytical() -> None:
     plt.suptitle(f"3 Different Iteration Methods vs. Analytical Concentration ({N}x{N}-grid)")
     plt.show()
 
+def plot_convergence_measures():
+    """Create a figure for showing the convergence speed of 3 iteration methods."""
+    N = 50
+    x0 = np.zeros((N, N))
+    x0[0, :] = 1
+
+    J = Jacobi(x0)
+    G = Gauss_S(x0)
+
+    omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
+    Ss = [SOR(x0, omega=omega) for omega in omegas]
+
+    n_steps = 1000
+
+    J.run(n_steps)
+    G.run(n_steps)
+    [S.run(n_steps) for S in Ss]
+
+    # init figure
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
+
+    ax1.semilogy(np.arange(1, n_steps+1, 1), J.error_history, c='firebrick')
+    ax2.semilogy(np.arange(1, n_steps+1, 1), G.error_history, c="darkcyan")
+    
+    mpl_cmap = mpl.colormaps['plasma']
+    colors = mpl_cmap(np.linspace(0, 1, len(omegas)))
+    custom_cmap = ListedColormap(colors)
+    for i, (S, omega) in enumerate(zip(Ss, omegas)):
+        ax3.semilogy(np.arange(1, n_steps+1, 1), S.error_history, c=custom_cmap(i), label=f"$\\omega={omega}$")
+    
+    ax1.set_title("Jacobi Iteration")
+    ax1.set_xlabel("Iteration Number")
+    ax1.set_ylabel("Max Error ($\\epsilon$)")
+    
+    ax2.set_title("Gauss-Seidel Iteration")
+    ax2.set_xlabel("Iteration Number")
+    ax2.set_ylabel("Max Error ($\\epsilon$)")
+
+    ax3.set_title("SOR Iteration")
+    ax3.set_xlabel("Iteration Number")
+    ax3.set_ylabel("Max Error ($\\epsilon$)")
+    ax3.legend(fancybox=True, shadow=True)
+
+    plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
+    plt.show()
 
 def main():
     """Entry point when run as a script.
 
     CLI arguments:
         -question (str): One of 'H', 'I', or 'J'.
-            - E: plot numerical vs. analytical concentration profiles.
-            - F: plot 2D heatmaps at various time steps.
-            - G: animate the 2D diffusion over time.
+            - H: plot 3 iteration methods vs analytical solution.
+            - I: plot convergence speed of 3 iteration methods.
+            - J: (!not yet implemented)
     """
     args = parse_args()
 
     if args.question == 'H':
         plot_itermethods_vs_analytical()
     elif args.question == 'I':
-        pass
+        plot_convergence_measures()
     else:
         pass
 
