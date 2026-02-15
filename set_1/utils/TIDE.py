@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class general_TIDE():
     "Base class for iterative methods"
     def __init__(self, x0: np.ndarray, save_every: int = 1):
@@ -46,7 +47,7 @@ class Gauss_S(general_TIDE):
         self.red_mask = (np.indices(self.x.shape).sum(axis=0) % 2) == 0
         self.black_mask = ~self.red_mask
 
-    def _update_mask(self, mask):
+    def _update_mask(self, mask: np.ndarray) -> None:
         x_next = 1/4 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :] )
@@ -64,7 +65,7 @@ class SOR(Gauss_S):
         super().__init__(x0, save_every)
         self.omega = omega
         
-    def _update_mask(self, mask):
+    def _update_mask(self, mask: np.ndarray) -> None:
         # Use the omega value defined in __init__
         w = self.omega if self.omega is not None else 1.0
         
