@@ -47,7 +47,7 @@ def gauss_seidel_jit(x: np.ndarray) -> float:
         if i % 2 == 0:
             next = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
             diff = abs(next - x[i, 0])
-            x[i, 0] = x[i, -1] = next
+            x[i, 0] = next
             max_diff = max(max_diff, diff)
 
         # interior
@@ -57,6 +57,9 @@ def gauss_seidel_jit(x: np.ndarray) -> float:
             diff = abs(next - x[i, j])
             x[i, j] = next
             max_diff = max(max_diff, diff)
+        
+        # enforce periodicity condition for the rightmost column
+        x[i, -1] = x[i, 0]
 
     # black points
     for i in prange(1, rows - 1):
@@ -64,7 +67,7 @@ def gauss_seidel_jit(x: np.ndarray) -> float:
         if i % 2 != 0:
             next = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
             diff = abs(next - x[i, 0])
-            x[i, 0] = x[i, -1] = next
+            x[i, 0] = next
             max_diff = max(max_diff, diff)
 
         # interior
@@ -74,6 +77,9 @@ def gauss_seidel_jit(x: np.ndarray) -> float:
             diff = abs(next - x[i, j])
             x[i, j] = next
             max_diff = max(max_diff, diff)
+
+        # enforce periodicity condition for the rightmost column
+        x[i, -1] = x[i, 0]
             
     return max_diff
 
@@ -90,7 +96,7 @@ def sor_jit(x: np.ndarray, omega: float) -> float:
             neighbor_sum = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
             next = (1 - omega) * x[i, 0] + omega * neighbor_sum
             diff = abs(next - x[i, 0])
-            x[i, 0] = x[i, -1] = next
+            x[i, 0] = next
             max_diff = max(max_diff, diff)
         
         # interior
@@ -102,6 +108,9 @@ def sor_jit(x: np.ndarray, omega: float) -> float:
             x[i, j] = next
             max_diff = max(max_diff, diff)
 
+        # enforce periodicity condition for the rightmost column
+        x[i, -1] = x[i, 0]
+
     # black points
     for i in prange(1, rows - 1):
         # boundary
@@ -109,7 +118,7 @@ def sor_jit(x: np.ndarray, omega: float) -> float:
             neighbor_sum = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
             next = (1 - omega) * x[i, 0] + omega * neighbor_sum
             diff = abs(next - x[i, 0])
-            x[i, 0] = x[i, -1] = next
+            x[i, 0] = next
             max_diff = max(max_diff, diff)
         
         # interior
@@ -120,5 +129,8 @@ def sor_jit(x: np.ndarray, omega: float) -> float:
             diff = abs(next - x[i, j])
             x[i, j] = next
             max_diff = max(max_diff, diff)
+
+        # enforce periodicity condition for the rightmost column
+        x[i, -1] = x[i, 0]
 
     return max_diff

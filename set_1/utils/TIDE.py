@@ -99,7 +99,11 @@ class GaussSeidel(GeneralTIDE):
         
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
         inner_mask = mask[1:-1, :]
+        # avoid updating the rightmost column to prevent double update
+        inner_mask[:, -1] = False
         self.x[1:-1, :][inner_mask] = x_next[inner_mask]
+        # enforce periodicity condition for the rightmost column
+        self.x[1:-1, -1] = self.x[1:-1, 0]
         return error
     
     def _update_func(self):
@@ -133,7 +137,11 @@ class SOR(GaussSeidel):
         x_next = w * neighbor_sum + (1 - w) * self.x[1:-1, :]
         error = np.max(np.abs(x_next - self.x[1:-1, :]))  
         inner_mask = mask[1:-1, :]
+        # avoid updating the rightmost column to prevent double update
+        inner_mask[:, -1] = False
         self.x[1:-1, :][inner_mask] = x_next[inner_mask]
+        # enforce periodicity condition for the rightmost column
+        self.x[1:-1, -1] = self.x[1:-1, 0]
         return error
     
     def _setup_jit(self):
