@@ -3,12 +3,10 @@ import argparse
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.animation import FuncAnimation
 from matplotlib.colors import ListedColormap
 
 from ..utils.config import *  # noqa: F403
-from ..utils.misc import analytical_concentration
-from ..utils.TIDE import SOR, Gauss_S, Jacobi
+from ..utils.TIDE import Jacobi, GaussSeidel, SOR
 
 
 def parse_args() -> argparse.Namespace:
@@ -35,7 +33,7 @@ def plot_itermethods_vs_analytical() -> None:
     x0[0, :] = 1
 
     J = Jacobi(x0)
-    G = Gauss_S(x0)
+    G = GaussSeidel(x0)
     S = SOR(x0)
 
     J.run(500)
@@ -93,10 +91,10 @@ def plot_convergence_measures():
     x0[0, :] = 1
 
     J = Jacobi(x0)
-    G = Gauss_S(x0)
+    G = GaussSeidel(x0)
 
     omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
-    Ss = [SOR(x0, omega=omega) for omega in omegas]
+    Ss = [SOR(x0, save_every=0, omega=omega) for omega in omegas]
 
     n_steps = 1000
 
@@ -130,6 +128,33 @@ def plot_convergence_measures():
     ax3.legend(fancybox=True, shadow=True)
 
     plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
+    plt.show()
+
+def find_optimal_omega():
+    """Find the optimal omega for SOR iteration at different grid sizes."""
+    N_values = [10, 20, 50, 100]
+    optimal_omegas = []
+
+    for N in N_values:
+        x0 = np.zeros((N, N))
+        x0[0, :] = 1
+
+        omegas = np.linspace(1.7, 2.0, 11)
+        Ss = [SOR(x0, save_every=0, omega=omega) for omega in omegas]
+
+        n_steps = 1000
+        [S.run(n_steps) for S in Ss]
+
+        final_errors = [S.error_history[-1] for S in Ss]
+        optimal_omega = omegas[np.argmin(final_errors)]
+        optimal_omegas.append(optimal_omega)
+
+    plt.plot(N_values, optimal_omegas, marker='o')
+    plt.title("Optimal Omega for SOR Iteration vs Grid Size")
+    plt.xlabel("Grid Size (N)")
+    plt.ylabel("Optimal Omega")
+    plt.xscale('log')
+    plt.grid()
     plt.show()
 
 def main():
