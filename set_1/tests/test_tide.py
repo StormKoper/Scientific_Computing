@@ -96,3 +96,16 @@ def test_SOR_equivalence():
             S_jit.run(n_iters, epsilon)
             
             assert np.allclose(S.x, S_jit.x)
+
+def test_obj_circle():
+    N = 100
+    y, x = np.ogrid[:N, :N]
+    center_y, center_x = 50, 50
+    radius = 15
+    circle_mask = (x - center_x)**2 + (y - center_y)**2 <= radius**2
+    x0 = np.zeros((N, N))
+    solver = Jacobi(x0)
+
+    solver.objects(circle_mask, value=0.0)
+    sol = solver.run(n_iters=1000)
+

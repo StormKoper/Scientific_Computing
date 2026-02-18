@@ -13,6 +13,9 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         self.iter_count = 0
         self.error_history = [] 
 
+        self.obj_map = np.zeros_like(x0, dtype=int)
+        self.obj_val = 0.0
+
     def _update_func(self):
         """Should contain the logic to update the x by one step"""
         raise(NotImplementedError)
@@ -47,7 +50,14 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
             error = float('inf')
             while error > epsilon:
                 error = self._step()
-            
+
+    def objects(self, mask_indices, value):
+        """Sets where the objects are"""
+        self.obj_map[mask_indices] = 1
+        self.obj_val = value
+
+        # Initialise grid
+        self.x[self.obj_map == 1] = self.obj_val
     
 class Jacobi(GeneralTIDE):
     """Jacobi Iteration Function"""
@@ -63,9 +73,11 @@ class Jacobi(GeneralTIDE):
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
         self.x[1:-1, :] = x_next
 
+        # For objects
+        self.x[self.obj_map == 1] = self.obj_val
+
         return error
         
-    
     def _setup_jit(self):
         from .optimized import jacobi_jit
         self._x_next = self.x.copy()
@@ -102,6 +114,10 @@ class GaussSeidel(GeneralTIDE):
         # avoid updating the rightmost column to prevent double update
         inner_mask[:, -1] = False
         self.x[1:-1, :][inner_mask] = x_next[inner_mask]
+
+        # For objects
+        self.x[self.obj_map == 1] = self.obj_val
+
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
         return error
@@ -140,6 +156,10 @@ class SOR(GaussSeidel):
         # avoid updating the rightmost column to prevent double update
         inner_mask[:, -1] = False
         self.x[1:-1, :][inner_mask] = x_next[inner_mask]
+
+        # For objects
+        self.x[self.obj_map == 1] = self.obj_val
+
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
         return error
@@ -152,3 +172,4 @@ class SOR(GaussSeidel):
             return error
             
         self._update_func = jit_wrapper
+

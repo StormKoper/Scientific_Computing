@@ -4,6 +4,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
+from matplotlib.animation import FuncAnimation
 
 from ..utils.config import *  # noqa: F403
 from ..utils.TIDE import Jacobi, GaussSeidel, SOR
@@ -19,8 +20,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "-question",
-        choices=["H", "I", "J"],
-        help="For which question you want to create a plot ['H', 'I', 'J']",
+        choices=["H", "I", "J", "K"],
+        help="For which question you want to create a plot ['H', 'I', 'J', 'K']",
         type=str,
         required=True
     )
@@ -214,6 +215,93 @@ def find_optimal_omega(golden_section=False):
     plt.yscale("log")
     plt.tight_layout()
     plt.savefig("set_1/results/golden_section.png", dpi=300)
+
+def plot_sinks():
+    """Plotting convergence for each iterative method including objects in the domain"""
+    N = 50
+    n_steps=1000
+    x0 = np.ones((N, N)) * 10.0 # Initialise with high value
+    y, x = np.ogrid[:N, :N]
+    center_y, center_x = 25, 25
+    radius = 10
+    circle_mask = (x - center_x)**2 + (y - center_y)**2 <= radius**2 # Circle in domain
+
+    J = Jacobi(x0)
+    G = GaussSeidel(x0)
+
+    omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
+    Ss = [SOR(x0.copy(), omega=omega) for omega in omegas]
+
+    J.objects(circle_mask, value=0.0)
+    G.objects(circle_mask, value=0.0)
+
+    for S in Ss:
+        S.objects(circle_mask, value=0.0)
+
+    sol_J = J.run(n_steps)
+    sol_G = G.run(n_steps)
+    sol_S = [S.run(n_steps) for S in Ss]
+
+    # init figure
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
+
+    ax1.semilogy(np.arange(1, n_steps+1, 1), J.error_history, c='firebrick')
+    ax2.semilogy(np.arange(1, n_steps+1, 1), G.error_history, c="darkcyan")
+    
+    mpl_cmap = mpl.colormaps['plasma']
+    colors = mpl_cmap(np.linspace(0, 1, len(omegas)))
+    custom_cmap = ListedColormap(colors)
+    for i, (S, omega) in enumerate(zip(Ss, omegas)):
+        ax3.semilogy(np.arange(1, n_steps+1, 1), S.error_history, c=custom_cmap(i), label=f"$\\omega={omega}$")
+    
+    ax1.set_title("Jacobi Iteration")
+    ax1.set_xlabel("Iteration Number")
+    ax1.set_ylabel("Max Error ($\\epsilon$)")
+    
+    ax2.set_title("Gauss-Seidel Iteration")
+    ax2.set_xlabel("Iteration Number")
+    ax2.set_ylabel("Max Error ($\\epsilon$)")
+
+    ax3.set_title("SOR Iteration")
+    ax3.set_xlabel("Iteration Number")
+    ax3.set_ylabel("Max Error ($\\epsilon$)")
+    ax3.legend(fancybox=True, shadow=True)
+
+    plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
+    plt.show()
+
+def animate_sinks():
+    """Animate the iterative process to see the sink in action."""
+    N = 50
+    n_steps = 5000 
+    
+    x0 = np.zeros((N, N)) 
+    x0[-1, :] = 1.0 # Top row fixed at C=1
+    y, x = np.ogrid[:N, :N]
+    center = N // 2
+    radius = N // 5
+    circle_mask = (x - center)**2 + (y - center)**2 <= radius**2
+
+    solver = Jacobi(x0, save_every = 2.0)
+    solver.objects(circle_mask, value=0.0) 
+
+    solver.run(n_steps)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    artist = ax.imshow(solver.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
+    
+    plt.colorbar(artist, label='Concentration (C)')
+
+    ax.set_title("Diffusion using Jacobi with objects")
+    plt.xlabel("Grid X")
+    plt.ylabel("Grid Y")
+
+    def update(frame_idx: int):
+        artist.set_data(solver.x_arr[..., frame_idx])
+        return (artist,)
+
+    anim = FuncAnimation(fig, update, frames=solver.x_arr.shape[-1], interval=20, blit=True)
+    
     plt.show()
 
 def main():
@@ -233,6 +321,9 @@ def main():
         plot_convergence_measures()
     elif args.question == 'J':
         find_optimal_omega(True)
+    elif args.question == 'K':
+        plot_sinks()
+        animate_sinks()
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
