@@ -381,7 +381,7 @@ def main():
     elif args.question == 'J':
         find_optimal_omega(True)
     elif args.question == 'K':
-        complex_field
+        conc_field()
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
