@@ -22,7 +22,7 @@ def parse_args() -> argparse.Namespace:
         required=True
     )
     parser.add_argument(
-        "-n_iters",
+        "-iterations",
         help="Number of iterations to run",
         type=int,
         required=False,
@@ -30,9 +30,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-N",
+        help="Grid size (N x N for 2D, length N for 1D)",
         type=int,
-        default=100,
-        help="Grid size (N x N for 2D, length N for 1D)"
+        required=False,
+        default=100
+    )
+    parser.add_argument(
+        "-repeats",
+        help="Number of times to repeat the benchmark",
+        type=int,
+        required=False,
+        default=1
     )
     parser.add_argument(
         "--warmup_jit",
@@ -77,16 +85,29 @@ if __name__ == "__main__":
         warmup = deepcopy(jit)
         warmup.run(10)
 
-    print(f"Running base benchmark for {args.method}...")
-    start_time = timeit.default_timer()
-    base.run(args.n_iters)
-    end_time = timeit.default_timer()
-    base_time = end_time - start_time
+    print(f"Running benchmark for {args.method} with N={args.N}, {args.iterations} iterations, and {args.repeats} repeats...")
+    base_times = np.zeros(args.repeats)
+    jit_times = np.zeros(args.repeats)
+    for i in range(args.repeats):
+        print(f"Base benchmark {i+1}", end="")
+        base_instance = deepcopy(base)
+        start_time = timeit.default_timer()
+        base_instance.run(args.iterations)
+        end_time = timeit.default_timer()
+        base_time = end_time - start_time
+        base_times[i] = base_time
+        print(f" | {base_time:.4f} seconds")
 
-    print(f"Running JIT benchmark for {args.method}...")
-    start_time = timeit.default_timer()
-    jit.run(args.n_iters)
-    end_time = timeit.default_timer()
-    jit_time = end_time - start_time
+        print(f"JIT  benchmark {i+1}", end="")
+        jit_instance = deepcopy(jit)
+        start_time = timeit.default_timer()
+        jit_instance.run(args.iterations)
+        end_time = timeit.default_timer()
+        jit_time = end_time - start_time
+        jit_times[i] = jit_time
+        print(f" | {jit_time:.4f} seconds")
 
-    print(f"{args.method} - Base time: {base_time:.4f} seconds, JIT time: {jit_time:.4f} seconds, Speedup: {base_time/jit_time:.2f}x")
+    if args.repeats > 1:
+        print(f"{args.method} - Base time: {base_times.mean():.4f} ± {base_times.std():.4f} seconds, JIT time: {jit_times.mean():.4f} ± {jit_times.std():.4f} seconds, Speedup: {base_times.mean()/jit_times.mean():.2f}x")
+    else:
+        print(f"{args.method} - Base time: {base_times[0]:.4f} seconds, JIT time: {jit_times[0]:.4f} seconds, Speedup: {base_times[0]/jit_times[0]:.2f}x")
