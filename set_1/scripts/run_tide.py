@@ -273,34 +273,93 @@ def plot_sinks():
 def animate_sinks():
     """Animate the iterative process to see the sink in action."""
     N = 50
-    n_steps = 5000 
+    n_steps = 1000
     
     x0 = np.zeros((N, N)) 
     x0[-1, :] = 1.0 # Top row fixed at C=1
+
+    # Introduce objects
     y, x = np.ogrid[:N, :N]
     center = N // 2
-    radius = N // 5
+    radius = N // 25
     circle_mask = (x - center)**2 + (y - center)**2 <= radius**2
 
-    solver = Jacobi(x0, save_every = 2.0)
-    solver.objects(circle_mask, value=0.0) 
+    J = Jacobi(x0, save_every = 1)
+    G = GaussSeidel(x0, save_every= 1)
+    S = SOR(x0, save_every= 1, omega = 1.8) 
 
-    solver.run(n_steps)
+    J.objects(circle_mask, value=0.0)
+    G.objects(circle_mask, value=0.0)
+    S.objects(circle_mask, value=0.0)
 
-    fig, ax = plt.subplots(figsize=(6, 6))
-    artist = ax.imshow(solver.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
+    sol_J = J.run(n_steps)
+    sol_G = G.run(n_steps)
+    sol_S = S.run(n_steps)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5), constrained_layout=True)
     
-    plt.colorbar(artist, label='Concentration (C)')
+    im1 = ax1.imshow(J.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
+    im2 = ax2.imshow(G.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
+    im3 = ax3.imshow(S.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
 
-    ax.set_title("Diffusion using Jacobi with objects")
-    plt.xlabel("Grid X")
-    plt.ylabel("Grid Y")
+    ax1.set_title("Jacobi")
+    ax2.set_title("Gauss-Seidel")
+    ax3.set_title("SOR ($\omega=1.8$)")
 
-    def update(frame_idx: int):
-        artist.set_data(solver.x_arr[..., frame_idx])
-        return (artist,)
+    def update(i):
+        im1.set_data(J.x_arr[..., min(i, J.x_arr.shape[-1]-1)])
+        im2.set_data(G.x_arr[..., min(i, G.x_arr.shape[-1]-1)])
+        im3.set_data(S.x_arr[..., min(i, S.x_arr.shape[-1]-1)])
+        return im1, im2, im3
 
-    anim = FuncAnimation(fig, update, frames=solver.x_arr.shape[-1], interval=20, blit=True)
+    max_frames = max(J.x_arr.shape[-1], G.x_arr.shape[-1], S.x_arr.shape[-1])
+
+    ani = FuncAnimation(fig, update, frames=max_frames, interval=20, blit=True)
+    plt.suptitle("Diffusion Comparison with Central Sink")
+    plt.show()
+
+def conc_field(mask):
+    Ny, Nx= mask.shape
+    n_steps = 10000
+
+    x0 = np.zeros((Ny, Nx)) 
+    x0[-1, :] = 1.0 # Top row fixed at C=1
+
+    S = SOR(x0.copy(), save_every= 1, omega = 1.8) # Update for optimal omega level
+    S.objects(mask, value=0.0)
+
+    sol_S = S.run(n_steps)
+
+    # Animation plot
+    fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)    
+    im = ax.imshow(S.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
+
+    ax.set_title("SOR Iteration ($\omega=1.8$) with Sink")
+    ax.set_xlabel("Space (x)")
+    ax.set_ylabel("Space (y)")
+    plt.colorbar(im, label='Concentration (C)')
+
+    def update(i):
+        im.set_data(S.x_arr[..., i])
+        return (im,)
+
+    frames = S.x_arr.shape[-1]
+
+    ani = FuncAnimation(fig, update, frames=frames, interval=20, blit=True)
+    plt.show()
+
+    # Plot at final step
+    fig_snap, ax_snap = plt.subplots(figsize=(6, 6))
+    
+    # Take the last frame 
+    final_frame = S.x_arr[..., -1]
+    
+    im_snap = ax_snap.imshow(final_frame, origin="lower", cmap='magma', vmin=0, vmax=1)
+    plt.colorbar(im_snap, label='Concentration (C)')
+    
+    ax_snap.set_title("Steady-State Solution (Final Frame)")
+    ax_snap.set_xlabel("Space (x)")
+    ax_snap.set_ylabel("Space (y)")
     
     plt.show()
 
@@ -322,8 +381,7 @@ def main():
     elif args.question == 'J':
         find_optimal_omega(True)
     elif args.question == 'K':
-        plot_sinks()
-        animate_sinks()
+        complex_field
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
