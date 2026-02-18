@@ -32,7 +32,7 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         
         return error
 
-    def run(self, n_iters: int|None, epsilon: float|None = None):
+    def run(self, n_iters: int|None = None, epsilon: float|None = None):
         if n_iters is None and epsilon is None:
             raise ValueError("Either n_iters or epsilon should be provided.")
         

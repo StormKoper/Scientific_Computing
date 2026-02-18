@@ -3,7 +3,7 @@ Tadhg Jones, David Kraakman, Storm Koper
 
 run tests with "uv run pytest set_1"
 
-run benchmarks with "uv run -m set_1.scripts.benchmarks -method SOR -n_iters 1000 -N 500 --warmup_jit"
+run benchmarks with "uv run -m set_1.scripts.benchmarks -method SOR -iterations 1000 -N 500 -repeats 5 --warmup_jit"
 
 run experiment B/C with "uv run -m set_1.scripts.run_wave1D -b_type i -steps 10000 -save_every 10 --animate"
 

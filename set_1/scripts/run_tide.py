@@ -130,31 +130,90 @@ def plot_convergence_measures():
     plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
     plt.show()
 
-def find_optimal_omega():
+def find_optimal_omega(golden_section=False):
     """Find the optimal omega for SOR iteration at different grid sizes."""
-    N_values = [10, 20, 50, 100]
-    optimal_omegas = []
+    N_values = [5, 10, 20, 50, 100, 200]
+    epsilon = 1e-5
+    min_omega = 1.0
+    max_omega = 2.0
 
-    for N in N_values:
+    # sweep over omegas for each N
+    n_sweep = 11
+    omegas = np.linspace(min_omega, max_omega, n_sweep)
+    omegas[-1] = 1.99  # to avoid divergence at omega=2.0
+    iterations = np.zeros((len(N_values), n_sweep))
+    for i, N in enumerate(N_values):
+        print(f"Running omega sweep for N={N}...")
         x0 = np.zeros((N, N))
         x0[0, :] = 1
+        Ss = [SOR(x0.copy(), save_every=0, omega=omega, use_jit=True) for omega in omegas]
+        [S.run(epsilon=epsilon) for S in Ss]
+        iterations[i, :] = [S.iter_count for S in Ss]
+        
+    plt.plot(omegas, iterations.T, marker='o')
+    plt.xlabel("$\\omega$")
+    plt.ylabel("Number of Iterations to Converge")
+    plt.title("Finding Optimal $\\omega$ for SOR Iteration")
+    plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
+    plt.yscale("log")
+    plt.tight_layout()
+    plt.savefig("set_1/results/omega_sweep.png", dpi=300)
+    plt.show()
 
-        omegas = np.linspace(1.7, 2.0, 11)
-        Ss = [SOR(x0, save_every=0, omega=omega) for omega in omegas]
+    if not golden_section:
+        optimal_omegas = omegas[np.argmin(iterations, axis=1)]
+        for N, optimal_omega in zip(N_values, optimal_omegas):
+            print(f"Optimal omega for N={N}: {optimal_omega:.4f}")
+        return
+    
+    # golden section search for optimal omega
+    n_golden_section = 10
+    omegas_gs = [[] for _ in range(len(N_values))]
+    iterations_gs = [[] for _ in range(len(N_values))]
+    invphi = (np.sqrt(5) - 1) / 2 # 1/phi
+    for i, N in enumerate(N_values):
+        print(f"Running golden section search for N={N}...")
+        # find the two omegas that are closest to the optimal omega found in the sweep
+        optimal_omega_idx = np.argmin(iterations[i])
+        left_bound_idx = max(optimal_omega_idx - 1, 0)
+        right_bound_idx = min(optimal_omega_idx + 1, len(omegas) - 1)
+        a = omegas[left_bound_idx]
+        b = omegas[right_bound_idx]
+        omegas_gs[i].append(a)
+        omegas_gs[i].append(b)
+        iterations_gs[i].append(iterations[i,left_bound_idx])
+        iterations_gs[i].append(iterations[i,right_bound_idx])
+        print(f"Initial guess: omega={(a+b)/2:.4f}")
+        # iterate until we have done n_golden_section iterations
+        for _ in range(n_golden_section):
+            c = b - (b - a) * invphi
+            d = a + (b - a) * invphi
 
-        n_steps = 1000
-        [S.run(n_steps) for S in Ss]
+            S_c = SOR(x0.copy(), save_every=0, omega=c, use_jit=True)
+            S_d = SOR(x0.copy(), save_every=0, omega=d, use_jit=True)
 
-        final_errors = [S.error_history[-1] for S in Ss]
-        optimal_omega = omegas[np.argmin(final_errors)]
-        optimal_omegas.append(optimal_omega)
+            S_c.run(epsilon=epsilon)
+            S_d.run(epsilon=epsilon)
 
-    plt.plot(N_values, optimal_omegas, marker='o')
-    plt.title("Optimal Omega for SOR Iteration vs Grid Size")
-    plt.xlabel("Grid Size (N)")
-    plt.ylabel("Optimal Omega")
-    plt.xscale('log')
-    plt.grid()
+            omegas_gs[i].append(c)
+            omegas_gs[i].append(d)
+            iterations_gs[i].append(S_c.iter_count)
+            iterations_gs[i].append(S_d.iter_count)
+
+            if S_c.iter_count < S_d.iter_count:
+                b = d
+            else:
+                a = c
+            print(f"Updated guess: omega={(a+b)/2:.4f}")
+    
+    plt.plot(omegas_gs, iterations_gs, marker='o')
+    plt.xlabel("$\\omega$")
+    plt.ylabel("Number of Iterations to Converge")
+    plt.title("Finding Optimal $\\omega$ for SOR Iteration")
+    plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
+    plt.yscale("log")
+    plt.tight_layout()
+    plt.savefig("set_1/results/golden_section.png", dpi=300)
     plt.show()
 
 def main():
@@ -164,7 +223,7 @@ def main():
         -question (str): One of 'H', 'I', or 'J'.
             - H: plot 3 iteration methods vs analytical solution.
             - I: plot convergence speed of 3 iteration methods.
-            - J: (!not yet implemented)
+            - J: plot sweep and golden section search for optimal omega.
     """
     args = parse_args()
 
@@ -172,8 +231,10 @@ def main():
         plot_itermethods_vs_analytical()
     elif args.question == 'I':
         plot_convergence_measures()
+    elif args.question == 'J':
+        find_optimal_omega(True)
     else:
-        pass
+        raise ValueError(f"Invalid question choice: {args.question}")
 
 if __name__ == "__main__":
     main()
