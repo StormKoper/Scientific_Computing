@@ -310,7 +310,7 @@ def animate_sinks():
     
     plt.show()
 
-def plot_isolation():
+def plot_insulation():
     N = 50
     n_steps = 5000 
     
@@ -351,7 +351,7 @@ def main():
         plot_sinks()
         animate_sinks()
     elif args.question == 'L':
-        plot_isolation()
+        plot_insulation()
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 

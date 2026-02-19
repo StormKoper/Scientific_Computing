@@ -32,8 +32,7 @@ def jacobi_jit(x: np.ndarray, x_next: np.ndarray, obj_mask: np.ndarray) -> float
         # interior
         for j in range(1, x.shape[1] - 1):
             if obj_mask[i, j]:
-                # dont forget to index obj_mask -1, since it has shape (48, 50)
-                x_next[i, j] = obj_mask[i - 1, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
+                x_next[i, j] = obj_mask[i, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
                 max_diff = max(max_diff, abs(x[i, j] - x_next[i, j]))
 
     return max_diff
@@ -57,8 +56,7 @@ def gauss_seidel_jit(x: np.ndarray, obj_mask: np.ndarray) -> float:
         start = 2 if (i % 2 == 0) else 1
         for j in range(start, cols - 1, 2):
             if obj_mask[i, j]:
-                # dont forget to index obj_mask -1, since it has shape (48, 50)
-                next = obj_mask[i - 1, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
+                next = obj_mask[i, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
                 diff = abs(next - x[i, j])
                 x[i, j] = next
                 max_diff = max(max_diff, diff)
@@ -79,8 +77,7 @@ def gauss_seidel_jit(x: np.ndarray, obj_mask: np.ndarray) -> float:
         start = 1 if (i % 2 == 0) else 2
         for j in range(start, cols - 1, 2):
             if obj_mask[i, j]:
-                # dont forget to index obj_mask -1, since it has shape (48, 50)
-                next = obj_mask[i-1, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
+                next = obj_mask[i, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
                 diff = abs(next - x[i, j])
                 x[i, j] = next
                 max_diff = max(max_diff, diff)
@@ -111,8 +108,7 @@ def sor_jit(x: np.ndarray, omega: float, obj_mask: np.ndarray) -> float:
         start = 2 if (i % 2 == 0) else 1
         for j in range(start, cols - 1, 2):
             if obj_mask[i, j]:
-                # dont forget to index obj_mask -1, since it has shape (48, 50)
-                neighbor_sum = obj_mask[i - 1, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
+                neighbor_sum = obj_mask[i, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
                 next = (1 - omega) * x[i, j] + omega * neighbor_sum
                 diff = abs(next - x[i, j])
                 x[i, j] = next
@@ -135,8 +131,7 @@ def sor_jit(x: np.ndarray, omega: float, obj_mask: np.ndarray) -> float:
         start = 1 if (i % 2 == 0) else 2
         for j in range(start, cols - 1, 2):
             if obj_mask[i, j]:
-                # dont forget to index obj_mask -1, since it has shape (48, 50)
-                neighbor_sum = obj_mask[i - 1, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
+                neighbor_sum = obj_mask[i, j] * (x[i-1, j] + x[i+1, j] + x[i, j-1] + x[i, j+1])
                 next = (1 - omega) * x[i, j] + omega * neighbor_sum
                 diff = abs(next - x[i, j])
                 x[i, j] = next

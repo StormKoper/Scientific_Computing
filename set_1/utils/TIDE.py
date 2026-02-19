@@ -17,7 +17,7 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         self.error_history = [] 
 
         # initialize an obj_mask with no objects
-        self.obj_mask = np.full_like(x0, 1, dtype=bool)[1:-1, :]
+        self.obj_mask = np.full_like(x0, 0.25, dtype=float)
 
     def _update_func(self):
         """Should contain the logic to update the x by one step"""
@@ -59,12 +59,17 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
 
         Args:
             - mask_indices (np.ndarray): 2D array with same shape as self.x that has 1s for cells part
-                of the object and 0s everywhere else. THERE SHOULD BE NO OBJECTS IN BORDERS
+                of the object and 0s everywhere else.
             - insulation (bool): whether the object behaves like insulation material - False is sink
         
         """
+        # enforce periodicity condition for the rightmost column
+        mask_indices[:, -1] = mask_indices[:, 0]
         # clear object in self.x
         self.x[mask_indices] = 0
+        # also clear object in self._x_next buffer for Jacobi JIT implementation
+        if hasattr(self, '_x_next'):
+            self._x_next[mask_indices] = 0
 
         if insulation:
             kernel = np.array([
@@ -73,16 +78,18 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
                 [0, 1, 0]
             ])
             # create obj_mask with 1/num_neighbors for all non-object cells, and 0s for object-cells
-            neighbor_count = convolve2d(~mask_indices[1:-1, :], kernel, mode='same', boundary='fill', fillvalue=1)
+            neighbor_count = convolve2d(~mask_indices[:, :-1], kernel, mode='same', boundary='wrap')
+            # add one column for the rightmost column that is periodic with the leftmost column
+            neighbor_count = np.hstack([neighbor_count, neighbor_count[:, 0][:, None]])
             
             # numpy way to do 1/arr only when non-zero value
             obj_mask = np.divide(1.0, neighbor_count, out=np.zeros_like(neighbor_count, dtype=float), where=neighbor_count!=0)
 
             # explicitly set object to 0 again to enforce good perimiters
-            obj_mask[mask_indices[1:-1, :]] = 0
+            obj_mask[mask_indices] = 0
         else:
             # create obj_mask with 0.25 for all non-object cells, and 0s for object-cells
-            obj_mask = ~mask_indices[1:-1, :] / 4
+            obj_mask = ~mask_indices / 4
 
         self.obj_mask = obj_mask
     
@@ -93,12 +100,12 @@ class Jacobi(GeneralTIDE):
         if use_jit:
             self._setup_jit()
     
-    def _update_func(self):
-        x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+    def _update_func(self) -> float:
+        x_next = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        self.x[1:-1, :][self.obj_mask] = x_next[self.obj_mask]
+        self.x[1:-1, :] = x_next
 
         return error
         
@@ -135,12 +142,12 @@ class GaussSeidel(GeneralTIDE):
             self.black_mask = black_mask
 
     def _update_mask(self, mask: np.ndarray) -> float:
-        x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+        x_next = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
         
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        self.x[1:-1, :][mask & self.obj_mask] = x_next[mask & self.obj_mask]
+        self.x[1:-1, :][mask] = x_next[mask]
 
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
@@ -166,17 +173,17 @@ class SOR(GaussSeidel):
         super().__init__(x0, save_every, use_jit)
         self.omega = omega
         
-    def _update_mask(self, mask: np.ndarray) -> None:
+    def _update_mask(self, mask: np.ndarray) -> float:
         # Use the omega value defined in __init__
         w = self.omega if self.omega is not None else 1.0
         
-        neighbor_sum = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+        neighbor_sum = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                        + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                        + self.x[2:, :] + self.x[:-2, :])
         
         x_next = w * neighbor_sum + (1 - w) * self.x[1:-1, :]
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        self.x[1:-1, :][mask & self.obj_mask] = x_next[mask & self.obj_mask]
+        self.x[1:-1, :][mask] = x_next[mask]
 
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
