@@ -1,5 +1,8 @@
-import numpy as np
 from warnings import warn
+
+import numpy as np
+from scipy.signal import convolve2d
+
 
 class GeneralTIDE(): # TIDE: time-independent diffusion equation
     "Base class for iterative methods"
@@ -13,8 +16,8 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         self.iter_count = 0
         self.error_history = [] 
 
-        self.obj_mask = np.full_like(x0, True, dtype=bool)[1:-1, :] # False where objects are, True otherwise
-        self.isolation = False
+        # initialize an obj_mask with no objects
+        self.obj_mask = np.full_like(x0, 1, dtype=bool)[1:-1, :]
 
     def _update_func(self):
         """Should contain the logic to update the x by one step"""
@@ -51,13 +54,37 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
             while error > epsilon:
                 error = self._step()
 
-    def objects(self, mask_indices: np.ndarray, value: float = 0.0, isolation: bool = False):
-        """Initialize objects in the grid"""
-        obj_mask = np.vstack([np.full(self.obj_mask.shape[1], True), self.obj_mask, np.full(self.obj_mask.shape[1], True)])
-        obj_mask[mask_indices] = False
-        self.x[~obj_mask] = value
-        self.obj_mask = obj_mask[1:-1, :]
-        self.isolation = isolation
+    def objects(self, mask_indices: np.ndarray, insulation: bool = False):
+        """Initialize objects in the grid.
+
+        Args:
+            - mask_indices (np.ndarray): 2D array with same shape as self.x that has 1s for cells part
+                of the object and 0s everywhere else. THERE SHOULD BE NO OBJECTS IN BORDERS
+            - insulation (bool): whether the object behaves like insulation material - False is sink
+        
+        """
+        # clear object in self.x
+        self.x[mask_indices] = 0
+
+        if insulation:
+            kernel = np.array([
+                [0, 1, 0],
+                [1, 0, 1],
+                [0, 1, 0]
+            ])
+            # create obj_mask with 1/num_neighbors for all non-object cells, and 0s for object-cells
+            neighbor_count = convolve2d(~mask_indices[1:-1, :], kernel, mode='same', boundary='fill', fillvalue=1)
+            
+            # numpy way to do 1/arr only when non-zero value
+            obj_mask = np.divide(1.0, neighbor_count, out=np.zeros_like(neighbor_count, dtype=float), where=neighbor_count!=0)
+
+            # explicitly set object to 0 again to enforce good perimiters
+            obj_mask[mask_indices[1:-1, :]] = 0
+        else:
+            # create obj_mask with 0.25 for all non-object cells, and 0s for object-cells
+            obj_mask = ~mask_indices[1:-1, :] / 4
+
+        self.obj_mask = obj_mask
     
 class Jacobi(GeneralTIDE):
     """Jacobi Iteration Function"""
@@ -79,7 +106,7 @@ class Jacobi(GeneralTIDE):
         from .optimized import jacobi_jit
         self._x_next = self.x.copy()
         def jit_wrapper() -> float:
-            error = jacobi_jit(self.x, self._x_next, self.obj_mask, self.isolation)
+            error = jacobi_jit(self.x, self._x_next, self.obj_mask)
             
             # swap references for next iteration
             old_x = self.x
@@ -107,7 +134,7 @@ class GaussSeidel(GeneralTIDE):
             self.red_mask = red_mask
             self.black_mask = black_mask
 
-    def _update_mask(self, mask: np.ndarray) -> None:
+    def _update_mask(self, mask: np.ndarray) -> float:
         x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
@@ -128,7 +155,7 @@ class GaussSeidel(GeneralTIDE):
         from .optimized import gauss_seidel_jit
         
         def jit_wrapper() -> float:
-            error = gauss_seidel_jit(self.x, self.obj_mask, self.isolation)
+            error = gauss_seidel_jit(self.x, self.obj_mask)
             return error
             
         self._update_func = jit_wrapper
@@ -159,7 +186,7 @@ class SOR(GaussSeidel):
         from .optimized import sor_jit
         
         def jit_wrapper() -> float:
-            error = sor_jit(self.x, self.omega, self.obj_mask, self.isolation)
+            error = sor_jit(self.x, self.omega, self.obj_mask)
             return error
             
         self._update_func = jit_wrapper

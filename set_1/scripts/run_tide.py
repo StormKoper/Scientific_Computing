@@ -3,11 +3,11 @@ import argparse
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import ListedColormap
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 
 from ..utils.config import *  # noqa: F403
-from ..utils.TIDE import Jacobi, GaussSeidel, SOR
+from ..utils.TIDE import SOR, GaussSeidel, Jacobi
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,8 +20,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "-question",
-        choices=["H", "I", "J", "K"],
-        help="For which question you want to create a plot ['H', 'I', 'J', 'K']",
+        choices=["H", "I", "J", "K", "L"],
+        help="For which question you want to create a plot ['H', 'I', 'J', 'K', 'L']",
         type=str,
         required=True
     )
@@ -238,11 +238,11 @@ def plot_sinks():
     omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
     Ss = [SOR(x0.copy(), omega=omega) for omega in omegas]
 
-    J.objects(circle_mask, value=0.0)
-    G.objects(circle_mask, value=0.0)
+    J.objects(circle_mask)
+    G.objects(circle_mask)
 
     for S in Ss:
-        S.objects(circle_mask, value=0.0)
+        S.objects(circle_mask)
 
     sol_J = J.run(n_steps)
     sol_G = G.run(n_steps)
@@ -288,8 +288,8 @@ def animate_sinks():
     radius = N // 5
     circle_mask = (x - center)**2 + (y - center)**2 <= radius**2
 
-    solver = Jacobi(x0, save_every = 2.0)
-    solver.objects(circle_mask, value=0.0) 
+    solver = Jacobi(x0, save_every = 2)
+    solver.objects(circle_mask) 
 
     solver.run(n_steps)
 
@@ -308,6 +308,26 @@ def animate_sinks():
 
     anim = FuncAnimation(fig, update, frames=solver.x_arr.shape[-1], interval=20, blit=True)
     
+    plt.show()
+
+def plot_isolation():
+    N = 50
+    n_steps = 5000 
+    
+    x0 = np.zeros((N, N)) 
+    x0[-1, :] = 1.0 # Top row fixed at C=1
+    y, x = np.ogrid[:N, :N]
+    center = N // 2
+    radius = N // 5
+    circle_mask = (x - center)**2 + (y - center)**2 <= radius**2
+
+    solver = SOR(x0, use_jit=True, save_every = 2)
+    solver.objects(circle_mask, insulation=True)
+
+    solver.run(n_steps)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    artist = ax.imshow(solver.x_arr[..., -1], origin="lower", cmap='magma', vmin=0, vmax=1)
     plt.show()
 
 def main():
@@ -330,6 +350,8 @@ def main():
     elif args.question == 'K':
         plot_sinks()
         animate_sinks()
+    elif args.question == 'L':
+        plot_isolation()
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
