@@ -1,22 +1,27 @@
-import numpy as np
 from warnings import warn
+
+import numpy as np
+from scipy.signal import convolve2d
+
 
 class GeneralTIDE(): # TIDE: time-independent diffusion equation
     "Base class for iterative methods"
-    def __init__(self, x0: np.ndarray, save_every: int = 1):
+    def __init__(self, x0: np.ndarray, save_every: int = 0, save_error: bool = False):
         self.x = x0
         self.constants = dict()
 
         self.save_every = save_every
-        self.x_arr = x0.astype(np.float16).copy()[..., None]
+        if save_every: self.x_arr = x0.astype(np.float16).copy()[..., None]
+        
+        self.save_error = save_error
+        if save_error: self.error_history = []
         
         self.iter_count = 0
-        self.error_history = [] 
 
-        self.obj_mask = np.full_like(x0, True, dtype=bool)[1:-1, :] # False where objects are, True otherwise
-        self.isolation = False
+        # initialize an obj_mask with no objects
+        self.obj_mask = np.full_like(x0, 0.25, dtype=float)
 
-    def _update_func(self):
+    def _update_func(self) -> float:
         """Should contain the logic to update the x by one step"""
         raise(NotImplementedError)
     
@@ -24,14 +29,15 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         """Perform a step and save error to error_history"""
         error = self._update_func()
         self.iter_count += 1
-        
-        # error history
-        self.error_history.append(error)
 
         # saving logic
         if self.save_every and (self.iter_count % self.save_every == 0):
              new = self.x.copy()[..., None]
              self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
+
+        # error history
+        if self.save_error:
+            self.error_history.append(error)
         
         return error
 
@@ -51,13 +57,44 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
             while error > epsilon:
                 error = self._step()
 
-    def objects(self, mask_indices: np.ndarray, value: float = 0.0, isolation: bool = False):
-        """Initialize objects in the grid"""
-        obj_mask = np.vstack([np.full(self.obj_mask.shape[1], True), self.obj_mask, np.full(self.obj_mask.shape[1], True)])
-        obj_mask[mask_indices] = False
-        self.x[~obj_mask] = value
-        self.obj_mask = obj_mask[1:-1, :]
-        self.isolation = isolation
+    def objects(self, mask_indices: np.ndarray, insulation: bool = False):
+        """Initialize objects in the grid.
+
+        Args:
+            - mask_indices (np.ndarray): 2D array with same shape as self.x that has 1s for cells part
+                of the object and 0s everywhere else.
+            - insulation (bool): whether the object behaves like insulation material - False is sink
+        
+        """
+        # enforce periodicity condition for the rightmost column
+        mask_indices[:, -1] = mask_indices[:, 0]
+        # clear object in self.x
+        self.x[mask_indices] = 0
+        # also clear object in self._x_next buffer for Jacobi JIT implementation
+        if hasattr(self, '_x_next'):
+            self._x_next[mask_indices] = 0
+
+        if insulation:
+            kernel = np.array([
+                [0, 1, 0],
+                [1, 0, 1],
+                [0, 1, 0]
+            ])
+            # create obj_mask with 1/num_neighbors for all non-object cells, and 0s for object-cells
+            neighbor_count = convolve2d(~mask_indices[:, :-1], kernel, mode='same', boundary='wrap')
+            # add one column for the rightmost column that is periodic with the leftmost column
+            neighbor_count = np.hstack([neighbor_count, neighbor_count[:, 0][:, None]])
+            
+            # numpy way to do 1/arr only when non-zero value
+            obj_mask = np.divide(1.0, neighbor_count, out=np.zeros_like(neighbor_count, dtype=float), where=neighbor_count!=0)
+
+            # explicitly set object to 0 again to enforce good perimiters
+            obj_mask[mask_indices] = 0
+        else:
+            # create obj_mask with 0.25 for all non-object cells, and 0s for object-cells
+            obj_mask = ~mask_indices / 4
+
+        self.obj_mask = obj_mask
     
 class Jacobi(GeneralTIDE):
     """Jacobi Iteration Function"""
@@ -66,12 +103,12 @@ class Jacobi(GeneralTIDE):
         if use_jit:
             self._setup_jit()
     
-    def _update_func(self):
-        x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+    def _update_func(self) -> float:
+        x_next = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        self.x[1:-1, :][self.obj_mask] = x_next[self.obj_mask]
+        self.x[1:-1, :] = x_next
 
         return error
         
@@ -79,7 +116,7 @@ class Jacobi(GeneralTIDE):
         from .optimized import jacobi_jit
         self._x_next = self.x.copy()
         def jit_wrapper() -> float:
-            error = jacobi_jit(self.x, self._x_next, self.obj_mask, self.isolation)
+            error = jacobi_jit(self.x, self._x_next, self.obj_mask)
             
             # swap references for next iteration
             old_x = self.x
@@ -107,13 +144,13 @@ class GaussSeidel(GeneralTIDE):
             self.red_mask = red_mask
             self.black_mask = black_mask
 
-    def _update_mask(self, mask: np.ndarray) -> None:
-        x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+    def _update_mask(self, mask: np.ndarray) -> float:
+        x_next = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
         
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        self.x[1:-1, :][mask & self.obj_mask] = x_next[mask & self.obj_mask]
+        self.x[1:-1, :][mask] = x_next[mask]
 
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
@@ -128,7 +165,7 @@ class GaussSeidel(GeneralTIDE):
         from .optimized import gauss_seidel_jit
         
         def jit_wrapper() -> float:
-            error = gauss_seidel_jit(self.x, self.obj_mask, self.isolation)
+            error = gauss_seidel_jit(self.x, self.obj_mask)
             return error
             
         self._update_func = jit_wrapper
@@ -139,17 +176,17 @@ class SOR(GaussSeidel):
         super().__init__(x0, save_every, use_jit)
         self.omega = omega
         
-    def _update_mask(self, mask: np.ndarray) -> None:
+    def _update_mask(self, mask: np.ndarray) -> float:
         # Use the omega value defined in __init__
         w = self.omega if self.omega is not None else 1.0
         
-        neighbor_sum = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+        neighbor_sum = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                        + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                        + self.x[2:, :] + self.x[:-2, :])
         
         x_next = w * neighbor_sum + (1 - w) * self.x[1:-1, :]
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        self.x[1:-1, :][mask & self.obj_mask] = x_next[mask & self.obj_mask]
+        self.x[1:-1, :][mask] = x_next[mask]
 
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
@@ -159,7 +196,7 @@ class SOR(GaussSeidel):
         from .optimized import sor_jit
         
         def jit_wrapper() -> float:
-            error = sor_jit(self.x, self.omega, self.obj_mask, self.isolation)
+            error = sor_jit(self.x, self.omega, self.obj_mask)
             return error
             
         self._update_func = jit_wrapper
