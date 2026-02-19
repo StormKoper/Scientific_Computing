@@ -133,7 +133,7 @@ def plot_convergence_measures():
 
 def find_optimal_omega():
     """Find the optimal omega for SOR iteration at different grid sizes."""
-    N_values = [5, 10, 20, 50, 100, 200]
+    N_values = [10, 20, 50, 100, 200, 500]
     epsilon = 1e-5
     min_omega = 1.0
     max_omega = 2.0
@@ -154,7 +154,7 @@ def find_optimal_omega():
     plt.plot(omegas, iterations.T, marker='o')
     plt.xlabel("$\\omega$")
     plt.ylabel("Number of Iterations to Converge")
-    plt.title("Parameter Sweep for Optimal $\\omega$")
+    plt.title(f"Parameter Sweep for Optimal $\\omega$ ($\\epsilon={epsilon:.0e}$)")
     plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
@@ -167,6 +167,8 @@ def find_optimal_omega():
     iterations_gs = [[] for _ in range(len(N_values))]
     invphi = (np.sqrt(5) - 1) / 2 # 1/phi
     optimal_omegas = np.zeros(len(N_values))
+    best_omegas = np.zeros(len(N_values))
+    best_iterations = np.zeros(len(N_values))
     for i, N in enumerate(N_values):
         print(f"Running golden section search for N={N}...")
         x0 = np.zeros((N, N))
@@ -201,13 +203,18 @@ def find_optimal_omega():
                 b = d
             else:
                 a = c
+        # the optimal omega is the midpoint of the final interval [a, b]
         optimal_omegas[i] = (a + b) / 2
-    for o, i in zip(omegas_gs, iterations_gs):
-        plt.plot(o, i, marker='o')
+        # the best omega is the one with the least iterations in the golden section search
+        best_omegas[i] = omegas_gs[i][np.argmin(iterations_gs[i])]
+        best_iterations[i] = np.min(iterations_gs[i])
+    for o, i, N in zip(omegas_gs, iterations_gs, N_values):
+        plt.plot(o, i, marker='o', markersize=3, alpha=0.5, linestyle='--', label=f"N={N}")
+    plt.plot(best_omegas, best_iterations, marker='o', c='black', label="Optimal $\\omega$")
     plt.xlabel("$\\omega$")
     plt.ylabel("Number of Iterations to Converge")
-    plt.title("Golden Section Search for Optimal $\\omega$")
-    plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
+    plt.title(f"Golden Section Search for Optimal $\\omega$ ($\\epsilon={epsilon:.0e}$)")
+    plt.legend(fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
     plt.savefig("set_1/results/golden_section.png", dpi=300)
