@@ -346,9 +346,10 @@ def conc_field(mask):
 
     x0 = np.zeros((Ny, Nx)) 
     x0[-1, :] = 1.0 # Top row fixed at C=1
+    x0[0, :] = 0.0
 
     S = SOR(x0.copy(), save_every= 1, omega = 1.8) # Update for optimal omega level
-    S.objects(mask, value=0.0)
+    S.objects(mask)
 
     sol_S = S.run(n_steps)
 

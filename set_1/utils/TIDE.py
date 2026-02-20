@@ -175,25 +175,24 @@ class SOR(GaussSeidel):
         self.omega = omega
         
     def _update_mask(self, mask: np.ndarray) -> None:
-        # Use the omega value defined in __init__
-        w = self.omega if self.omega is not None else 1.0
+        w = self.omega
         
-        neighbor_sum = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
-                       + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
-                       + self.x[2:, :] + self.x[:-2, :])
+        neighbor_sum = 0.25 * (self.x[1:-1, 2:] + self.x[1:-1, :-2] + 
+                               self.x[2:, 1:-1] + self.x[:-2, 1:-1])
         
-        x_next = w * neighbor_sum + (1 - w) * self.x[1:-1, :]
-        error = np.max(np.abs(x_next - self.x[1:-1, :]))  
-        inner_mask = mask[1:-1, :]
-        # avoid updating the rightmost column to prevent double update
-        inner_mask[:, -1] = False
-        self.x[1:-1, :][inner_mask] = x_next[inner_mask]
+        x_inner = self.x[1:-1, 1:-1]
+        x_next = w * neighbor_sum + (1 - w) * x_inner
+        
+        valid_pixels = ~mask[1:-1, 1:-1]
+        x_inner[valid_pixels] = x_next[valid_pixels]
 
-        # For objects
-        self.x[self.obj_map == 1] = self.obj_val
+        if self.obj_map is not None:
+            self.x[self.obj_map == 1] = self.obj_val
 
-        # enforce periodicity condition for the rightmost column
-        self.x[1:-1, -1] = self.x[1:-1, 0]
+        self.x[-1, :] = 1.0 
+        self.x[0, :] = 0.0  
+
+        error = np.max(np.abs(x_next[valid_pixels] - x_inner[valid_pixels]))
         return error
     
     def _setup_jit(self):
