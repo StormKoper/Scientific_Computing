@@ -20,8 +20,8 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "-question",
-        choices=["H", "I", "J", "K"],
-        help="For which question you want to create a plot ['H', 'I', 'J', 'K']",
+        choices=["H", "I", "J", "K", "L"],
+        help="For which question you want to create a plot ['H', 'I', 'J', 'K', 'L']",
         type=str,
         required=True
     )
@@ -385,6 +385,22 @@ def conc_field(mask):
     
     plt.show()
 
+def plot_insulation(mask):
+    Ny, Nx= mask.shape
+    n_steps = 10000
+
+    x0 = np.zeros((Ny, Nx)) 
+    x0[-1, :] = 1.0 # Top row fixed at C=1
+
+    solver = SOR(x0, use_jit=True, save_every = 2)
+    solver.objects(mask, insulation=True)
+
+    solver.run(n_steps)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    artist = ax.imshow(solver.x_arr[..., -1], origin="lower", cmap='magma', vmin=0, vmax=1)
+    plt.show()
+
 def main():
     """Entry point when run as a script.
 
@@ -405,10 +421,11 @@ def main():
     elif args.question == 'K':
         my_mask = complex_mask()
         final_field = conc_field(my_mask)
+    elif args.question == 'L':
+        my_mask = complex_mask()
+        insul_field = plot_insulation(my_mask)
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
 if __name__ == "__main__":
     main()
-
-
