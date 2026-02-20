@@ -188,10 +188,7 @@ class SOR(GaussSeidel):
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
         self.x[1:-1, :][mask] = x_next[mask]
 
-        self.x[-1, :] = 1.0 
-        self.x[0, :] = 0.0  
-
-         # enforce periodicity condition for the rightmost column
+        # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
         return error
     
