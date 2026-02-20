@@ -1,5 +1,6 @@
 import numpy as np
 from warnings import warn
+from scipy.signal import convolve2d
 
 class GeneralTIDE(): # TIDE: time-independent diffusion equation
     "Base class for iterative methods"
@@ -51,13 +52,44 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
             while error > epsilon:
                 error = self._step()
 
-    def objects(self, mask_indices, value):
-        """Sets where the objects are"""
-        self.obj_map[mask_indices] = 1
-        self.obj_val = value
+    def objects(self, mask_indices: np.ndarray, insulation: bool = False):
+        """Initialize objects in the grid.
 
-        # Initialise grid
-        self.x[self.obj_map == 1] = self.obj_val
+        Args:
+            - mask_indices (np.ndarray): 2D array with same shape as self.x that has 1s for cells part
+                of the object and 0s everywhere else.
+            - insulation (bool): whether the object behaves like insulation material - False is sink
+        
+        """
+        # enforce periodicity condition for the rightmost column
+        mask_indices[:, -1] = mask_indices[:, 0]
+        # clear object in self.x
+        self.x[mask_indices] = 0
+        # also clear object in self._x_next buffer for Jacobi JIT implementation
+        if hasattr(self, '_x_next'):
+            self._x_next[mask_indices] = 0
+
+        if insulation:
+            kernel = np.array([
+                [0, 1, 0],
+                [1, 0, 1],
+                [0, 1, 0]
+            ])
+            # create obj_mask with 1/num_neighbors for all non-object cells, and 0s for object-cells
+            neighbor_count = convolve2d(~mask_indices[:, :-1], kernel, mode='same', boundary='wrap')
+            # add one column for the rightmost column that is periodic with the leftmost column
+            neighbor_count = np.hstack([neighbor_count, neighbor_count[:, 0][:, None]])
+            
+            # numpy way to do 1/arr only when non-zero value
+            obj_mask = np.divide(1.0, neighbor_count, out=np.zeros_like(neighbor_count, dtype=float), where=neighbor_count!=0)
+
+            # explicitly set object to 0 again to enforce good perimiters
+            obj_mask[mask_indices] = 0
+        else:
+            # create obj_mask with 0.25 for all non-object cells, and 0s for object-cells
+            obj_mask = ~mask_indices / 4
+
+        self.obj_mask = obj_mask
     
 class Jacobi(GeneralTIDE):
     """Jacobi Iteration Function"""

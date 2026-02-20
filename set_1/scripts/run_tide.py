@@ -391,6 +391,7 @@ def plot_insulation(mask):
 
     x0 = np.zeros((Ny, Nx)) 
     x0[-1, :] = 1.0 # Top row fixed at C=1
+    x0[0, :] = 0.0
 
     solver = SOR(x0, use_jit=True, save_every = 2)
     solver.objects(mask, insulation=True)
