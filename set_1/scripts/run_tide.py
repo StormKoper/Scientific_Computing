@@ -2,12 +2,13 @@ import argparse
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
-from matplotlib.colors import ListedColormap
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 
 from ..utils.config import *  # noqa: F403
-from ..utils.TIDE import Jacobi, GaussSeidel, SOR
+from ..utils.TIDE import SOR, GaussSeidel, Jacobi
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,56 +34,38 @@ def plot_itermethods_vs_analytical() -> None:
     x0 = np.zeros((N, N))
     x0[0, :] = 1
 
-    J = Jacobi(x0.copy(), save_every=1)
-    G = GaussSeidel(x0.copy(), save_every=1)
-    S = SOR(x0.copy(), save_every=1, omega=1.8)
+    J = Jacobi(x0.copy(), save_every=1, use_jit=True)
+    G = GaussSeidel(x0.copy(), save_every=1, use_jit=True)
+    S = SOR(x0.copy(), save_every=1, omega=1.8, use_jit=True)
 
-    J.run(500)
-    G.run(500)
-    S.run(500)
-
-    # init figure and create cmap
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
-    mpl_cmap = mpl.colormaps['inferno']
-
-    steps_to_plot = np.arange(0, 501, 50)
-    colors = mpl_cmap(np.linspace(0, 1, len(steps_to_plot)))
-    custom_cmap = ListedColormap(colors)
-
-    for i, iter in enumerate(steps_to_plot):
-
-        y_vals = np.linspace(0, 1, N, dtype=float)
-
-        J_slice = J.x_arr[::-1, 1, iter]
-        ax1.plot(y_vals, J_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
-
-        G_slice = G.x_arr[::-1, 1, iter]
-        ax2.plot(y_vals, G_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
-
-        S_slice = S.x_arr[::-1, 1, iter]
-        ax3.plot(y_vals, S_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
+    n_iter = 5000
+    J.run(n_iter)
+    G.run(n_iter)
+    S.run(n_iter)
     
+    _ = plt.figure(figsize=(12,9), constrained_layout=True)
+
     # solving the time-independent diffusion equation, is just a line
-    ax1.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
-    ax2.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
-    ax3.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
-    
-    ax1.set_title("Jacobi Iteration")
-    ax1.set_xlabel("y-value")
-    ax1.set_ylabel("Concentration (C)")
-    ax1.legend(fancybox=True, shadow=True)
-    
-    ax2.set_title("Gauss-Seidel Iteration")
-    ax2.set_xlabel("y-value")
-    ax2.set_ylabel("Concentration (C)")
-    ax2.legend(fancybox=True, shadow=True)
+    y_vals = np.linspace(0, 1, N, dtype=float)
+    plt.plot(y_vals, y_vals, linestyle="-", linewidth=1, c='black', label="Analytical Sol")
 
-    ax3.set_title("SOR Iteration")
-    ax3.set_xlabel("y-value")
-    ax3.set_ylabel("Concentration (C)")
-    ax3.legend(fancybox=True, shadow=True)
+    J_slice = J.x_arr[::-1, 1, -1]
+    plt.plot(y_vals, J_slice, marker='o', linestyle='None', c='firebrick', label="Jacobi",
+             markevery=(0, 6), markersize=6)
 
-    plt.suptitle(f"3 Different Iteration Methods vs. Analytical Concentration ({N}x{N}-grid)")
+    G_slice = G.x_arr[::-1, 1, -1]
+    plt.plot(y_vals, G_slice, marker='x', linestyle='None', c='darkcyan', label="Gauss-Seidel",
+             markevery=(2, 6), markersize=6)
+
+    S_slice = S.x_arr[::-1, 1, -1]
+    plt.plot(y_vals, S_slice, marker='^', linestyle='None', c='forestgreen', label="SOR ($\\omega = 1.8$)",
+             markevery=(4, 6), markersize=6)
+    
+    plt.xlabel("y-value")
+    plt.ylabel("Concentration (C)")
+    plt.legend(fancybox=True, shadow=True)
+
+    plt.title(f"Three Different Iteration Methods vs. Analytical Concentration ({N}x{N}-grid, {n_iter} iters)")
     plt.show()
 
 def plot_convergence_measures():
@@ -91,42 +74,50 @@ def plot_convergence_measures():
     x0 = np.zeros((N, N))
     x0[0, :] = 1
 
-    J = Jacobi(x0.copy(), save_error=True)
-    G = GaussSeidel(x0.copy(), save_error=True)
+    J = Jacobi(x0.copy(), use_jit=True)
+    G = GaussSeidel(x0.copy(), use_jit=True)
 
     omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
-    Ss = [SOR(x0.copy(), omega=omega, save_error=True) for omega in omegas]
+    Ss = [SOR(x0.copy(), omega=omega, use_jit=True) for omega in omegas]
 
-    n_steps = 1000
+    p_s = np.arange(3, 9).astype(int)
 
-    J.run(n_steps)
-    G.run(n_steps)
-    [S.run(n_steps) for S in Ss]
+    iter_counts = {
+            "Jacobi": [],
+            "Gauss_Seidel": [],
+            "SOR": {omega: [] for omega in omegas},
+        }
+    for p in p_s:
+        epsilon = 10.0**(-p)
 
-    # init figure
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
+        J.run(epsilon=epsilon)
+        G.run(epsilon=epsilon)
 
-    ax1.semilogy(np.arange(1, n_steps+1, 1), J.error_history, c='firebrick')
-    ax2.semilogy(np.arange(1, n_steps+1, 1), G.error_history, c="darkcyan")
+        iter_counts["Jacobi"].append(J.iter_count)
+        iter_counts["Gauss_Seidel"].append(G.iter_count)
+
+        for omega, solver in zip(omegas, Ss):
+            solver.run(epsilon=epsilon)
+            iter_counts["SOR"][omega].append(solver.iter_count)
     
-    mpl_cmap = mpl.colormaps['plasma']
+    # init figure
+    _ = plt.figure(figsize=(10,8), constrained_layout=True)
+
+    plt.plot(p_s, iter_counts['Jacobi'], c='orangered', label='Jacobi')
+    plt.plot(p_s, iter_counts['Gauss_Seidel'], c='purple', label='Gauss_Seidel')
+
+    mpl_cmap = mpl.colormaps['winter']
     colors = mpl_cmap(np.linspace(0, 1, len(omegas)))
     custom_cmap = ListedColormap(colors)
-    for i, (S, omega) in enumerate(zip(Ss, omegas)):
-        ax3.semilogy(np.arange(1, n_steps+1, 1), S.error_history, c=custom_cmap(i), label=f"$\\omega={omega}$")
-    
-    ax1.set_title("Jacobi Iteration")
-    ax1.set_xlabel("Iteration Number")
-    ax1.set_ylabel("Max Error ($\\epsilon$)")
-    
-    ax2.set_title("Gauss-Seidel Iteration")
-    ax2.set_xlabel("Iteration Number")
-    ax2.set_ylabel("Max Error ($\\epsilon$)")
 
-    ax3.set_title("SOR Iteration")
-    ax3.set_xlabel("Iteration Number")
-    ax3.set_ylabel("Max Error ($\\epsilon$)")
-    ax3.legend(fancybox=True, shadow=True)
+    for i, (omega, iters) in enumerate(iter_counts['SOR'].items()):
+        plt.plot(p_s, iters, c=custom_cmap(i), linestyle="--", label=f'SOR $\\omega = {omega}$')
+
+    plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
+
+    plt.xlabel("p")
+    plt.ylabel("Iterations")
+    plt.legend(fancybox=True, shadow=True)
 
     plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
     plt.show()
