@@ -318,7 +318,29 @@ def animate_sinks():
     plt.suptitle("Diffusion Comparison with Central Sink")
     plt.show()
 
+def complex_mask():
+    """Define a complex mask to be used in the concentration field"""
+    N = 50
+    mask = np.zeros((N, N), dtype=bool)
+    y, x =np.ogrid[:N, :N]
+
+    # Circle in bottom left
+    circle_mask = (x - 12)**2 + (y - 12)**2 <= 6**2
+
+    # 2. Square in bottom right
+    square_mask = (x >= 30) & (x <= 42) & (y >= 8) & (y <= 20)
+    
+    # 3. Triangle in center top
+    triangle_mask = (y >= 30) & (y <= 40) & \
+                    (y - 30 <= 2 * (x - 15)) & \
+                    (y - 30 <= -2 * (x - 35))
+
+    # Combine all shapes 
+    mask = circle_mask | square_mask | triangle_mask
+    return mask
+
 def conc_field(mask):
+    """Produce a diffusion plot for any shape under the SOR method"""
     Ny, Nx= mask.shape
     n_steps = 10000
 
@@ -381,7 +403,8 @@ def main():
     elif args.question == 'J':
         find_optimal_omega(True)
     elif args.question == 'K':
-        conc_field()
+        my_mask = complex_mask()
+        final_field = conc_field(my_mask)
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
