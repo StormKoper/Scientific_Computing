@@ -113,7 +113,8 @@ def main():
     else:
         wave.run(args.steps)
 
-        plt.imshow(wave.x_arr, aspect='auto', cmap='viridis')
+        plt.imshow(wave.x_arr, aspect='auto', cmap='viridis', 
+                   extent=(0.0,float(args.steps*wave.dt),1.0,0.0))
         plt.colorbar(label='Wave Amplitude')
         plt.ylabel('Space (x)')
         plt.xlabel('Time (t)')
