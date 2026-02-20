@@ -8,6 +8,7 @@ import argparse
 import itertools
 
 import matplotlib as mpl
+import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -44,9 +45,9 @@ def plot_concentration() -> None:
     be plotted as well.
     """
     N = 25
-    t_s = [1.0, 0.1, 0.01, 0.001]
+    t_s = [0.001, 0.01, 0.1, 1.0]
     dx = 1.0 / (N-1)
-    dt = 0.15 * dx**2 / 1.0 #dt so that d=0.15 for stability
+    dt = 0.05 * dx**2 #dt so that d=0.05 for stability
 
     # init wave
     x0 = np.zeros((N, N))
@@ -58,35 +59,45 @@ def plot_concentration() -> None:
     wave.run(total_steps)
 
     # init figure and create cmap
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10,6), constrained_layout=True)
+    fig, ax = plt.subplots(1, 1, figsize=(10,8), constrained_layout=True)
     mpl_cmap = mpl.colormaps['viridis']
 
     colors = mpl_cmap(np.linspace(0, 1, len(t_s)))
     custom_cmap = ListedColormap(colors)
 
+    true_ts = []
     for i, t in enumerate(t_s):
         t_index = round(t / wave.dt)
         true_t = t_index * wave.dt
+        true_ts.append(true_t)
 
         concentration_slice = wave.x_arr[::-1, 1, t_index]
         y_vals = np.linspace(0, 1, N, dtype=float)
-        ax1.plot(y_vals, concentration_slice, 
-                 linestyle="-", c=custom_cmap(i), label=f"t: {true_t:.4f}")
+        ax.plot(y_vals, concentration_slice, linestyle="None", 
+                marker='o', c=custom_cmap(i))
         
-        ax2.plot(y_vals, [analytical_concentration(y, true_t, 1, 1000) for y in y_vals], 
-                 linestyle="-", c=custom_cmap(i), label=f"t: {true_t:.4f}")
+        ax.plot(y_vals, [analytical_concentration(y, true_t, 1, 1000) for y in y_vals], 
+                 linestyle="-", c=custom_cmap(i))
 
-    ax1.set_xlabel("y-value")
-    ax1.set_ylabel("Concentration (C)")
-    ax1.set_title("Numerical Obtained Concentrations")
-    ax1.legend(shadow=True, fancybox=True)
+    # custom legend (yes the first variable name was chosen deliberately :D)
+    anal_legend = mlines.Line2D([], [], color='black', linestyle='-', label='Analytical')
+    num_legend = mlines.Line2D([], [], color='black', marker='o', linestyle='None', label='Numerical')
+    t_1 = mlines.Line2D([], [], color=custom_cmap(0), marker='s', linestyle='None', label=f't: {true_ts[0]:.3f}')
+    t_2 = mlines.Line2D([], [], color=custom_cmap(1), marker='s', linestyle='None', label=f't: {true_ts[1]:.3f}')
+    t_3 = mlines.Line2D([], [], color=custom_cmap(2), marker='s', linestyle='None', label=f't: {true_ts[2]:.3f}')
+    t_4 = mlines.Line2D([], [], color=custom_cmap(3), marker='s', linestyle='None', label=f't: {true_ts[3]:.3f}')
+    ax.legend(
+        handles=[anal_legend, num_legend, t_1, t_2, t_3, t_4], 
+        loc='upper left',
+        shadow=True,
+        fancybox=True
+    )
 
-    ax2.set_xlabel("y-value")
-    ax2.set_ylabel("Concentration (C)")
-    ax2.set_title("Analytical Obtained Concentrations")
-    ax2.legend(shadow=True, fancybox=True)
+    ax.set_xlabel("y-value", fontsize=14)
+    ax.set_ylabel("Concentration (C)", fontsize=14)
 
-    plt.suptitle(f"Numerical vs. Analytical Concentration at Various Time Steps ({N}x{N}-grid)")
+    plt.suptitle(f"Numerical vs. Analytical Concentration at Various Time Steps ({N}x{N}-grid)",
+                 fontsize=16)
     plt.show()
 
 def plot_states() -> None:
@@ -98,7 +109,7 @@ def plot_states() -> None:
     N = 25
     t_s = [0, 0.001, 0.01, 0.1, 1.0]
     dx = 1.0 / (N-1)
-    dt = 0.15 * dx**2 / 1.0 #dt so that d=0.15 for stability
+    dt = 0.05 * dx**2 #dt so that d=0.05 for stability
 
     # init wave
     x0 = np.zeros((N, N))
@@ -109,7 +120,7 @@ def plot_states() -> None:
     total_steps = int(np.ceil(max(t_s) / wave.dt))
     wave.run(total_steps)
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10), constrained_layout=True)
+    fig, axes = plt.subplots(1, 5, figsize=(18, 5), constrained_layout=True)
     
     for ax, t in itertools.zip_longest(axes.flatten(), t_s):
         if t is None:
@@ -123,7 +134,7 @@ def plot_states() -> None:
         ax.set_ylabel("y")
         ax.set_xlabel("x")
     
-    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8)
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, orientation='horizontal')
     plt.suptitle("2D Heatmap of Concentration Values at Various Time Steps")
     plt.show()
 
