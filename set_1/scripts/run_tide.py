@@ -2,12 +2,13 @@ import argparse
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import numpy as np
-from matplotlib.colors import ListedColormap
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 
 from ..utils.config import *  # noqa: F403
-from ..utils.TIDE import Jacobi, GaussSeidel, SOR
+from ..utils.TIDE import SOR, GaussSeidel, Jacobi
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,56 +34,38 @@ def plot_itermethods_vs_analytical() -> None:
     x0 = np.zeros((N, N))
     x0[0, :] = 1
 
-    J = Jacobi(x0)
-    G = GaussSeidel(x0)
-    S = SOR(x0)
+    J = Jacobi(x0.copy(), save_every=1, use_jit=True)
+    G = GaussSeidel(x0.copy(), save_every=1, use_jit=True)
+    S = SOR(x0.copy(), save_every=1, omega=1.8, use_jit=True)
 
-    J.run(500)
-    G.run(500)
-    S.run(500)
-
-    # init figure and create cmap
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
-    mpl_cmap = mpl.colormaps['inferno']
-
-    steps_to_plot = np.arange(0, 501, 50)
-    colors = mpl_cmap(np.linspace(0, 1, len(steps_to_plot)))
-    custom_cmap = ListedColormap(colors)
-
-    for i, iter in enumerate(steps_to_plot):
-
-        y_vals = np.linspace(0, 1, N, dtype=float)
-
-        J_slice = J.x_arr[::-1, 1, iter]
-        ax1.plot(y_vals, J_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
-
-        G_slice = G.x_arr[::-1, 1, iter]
-        ax2.plot(y_vals, G_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
-
-        S_slice = S.x_arr[::-1, 1, iter]
-        ax3.plot(y_vals, S_slice, linestyle="-", c=custom_cmap(i), label=f"Iter: {iter:.0f}")
+    n_iter = 5000
+    J.run(n_iter)
+    G.run(n_iter)
+    S.run(n_iter)
     
+    _ = plt.figure(figsize=(12,9), constrained_layout=True)
+
     # solving the time-independent diffusion equation, is just a line
-    ax1.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
-    ax2.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
-    ax3.plot(y_vals, y_vals, linestyle=":", c='black', label="Analytical Sol")
-    
-    ax1.set_title("Jacobi Iteration")
-    ax1.set_xlabel("y-value")
-    ax1.set_ylabel("Concentration (C)")
-    ax1.legend(fancybox=True, shadow=True)
-    
-    ax2.set_title("Gauss-Seidel Iteration")
-    ax2.set_xlabel("y-value")
-    ax2.set_ylabel("Concentration (C)")
-    ax2.legend(fancybox=True, shadow=True)
+    y_vals = np.linspace(0, 1, N, dtype=float)
+    plt.plot(y_vals, y_vals, linestyle="-", linewidth=1, c='black', label="Analytical Sol")
 
-    ax3.set_title("SOR Iteration")
-    ax3.set_xlabel("y-value")
-    ax3.set_ylabel("Concentration (C)")
-    ax3.legend(fancybox=True, shadow=True)
+    J_slice = J.x_arr[::-1, 1, -1]
+    plt.plot(y_vals, J_slice, marker='o', linestyle='None', c='firebrick', label="Jacobi",
+             markevery=(0, 6), markersize=6)
 
-    plt.suptitle(f"3 Different Iteration Methods vs. Analytical Concentration ({N}x{N}-grid)")
+    G_slice = G.x_arr[::-1, 1, -1]
+    plt.plot(y_vals, G_slice, marker='x', linestyle='None', c='darkcyan', label="Gauss-Seidel",
+             markevery=(2, 6), markersize=6)
+
+    S_slice = S.x_arr[::-1, 1, -1]
+    plt.plot(y_vals, S_slice, marker='^', linestyle='None', c='forestgreen', label="SOR ($\\omega = 1.8$)",
+             markevery=(4, 6), markersize=6)
+    
+    plt.xlabel("y-value")
+    plt.ylabel("Concentration (C)")
+    plt.legend(fancybox=True, shadow=True)
+
+    plt.title(f"Three Different Iteration Methods vs. Analytical Concentration ({N}x{N}-grid, {n_iter} iters)")
     plt.show()
 
 def plot_convergence_measures():
@@ -91,49 +74,57 @@ def plot_convergence_measures():
     x0 = np.zeros((N, N))
     x0[0, :] = 1
 
-    J = Jacobi(x0)
-    G = GaussSeidel(x0)
+    J = Jacobi(x0.copy(), use_jit=True)
+    G = GaussSeidel(x0.copy(), use_jit=True)
 
     omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
-    Ss = [SOR(x0, save_every=0, omega=omega) for omega in omegas]
+    Ss = [SOR(x0.copy(), omega=omega, use_jit=True) for omega in omegas]
 
-    n_steps = 1000
+    p_s = np.arange(3, 9).astype(int)
 
-    J.run(n_steps)
-    G.run(n_steps)
-    [S.run(n_steps) for S in Ss]
+    iter_counts = {
+            "Jacobi": [],
+            "Gauss_Seidel": [],
+            "SOR": {omega: [] for omega in omegas},
+        }
+    for p in p_s:
+        epsilon = 10.0**(-p)
 
-    # init figure
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
+        J.run(epsilon=epsilon)
+        G.run(epsilon=epsilon)
 
-    ax1.semilogy(np.arange(1, n_steps+1, 1), J.error_history, c='firebrick')
-    ax2.semilogy(np.arange(1, n_steps+1, 1), G.error_history, c="darkcyan")
+        iter_counts["Jacobi"].append(J.iter_count)
+        iter_counts["Gauss_Seidel"].append(G.iter_count)
+
+        for omega, solver in zip(omegas, Ss):
+            solver.run(epsilon=epsilon)
+            iter_counts["SOR"][omega].append(solver.iter_count)
     
-    mpl_cmap = mpl.colormaps['plasma']
+    # init figure
+    _ = plt.figure(figsize=(10,8), constrained_layout=True)
+
+    plt.plot(p_s, iter_counts['Jacobi'], c='orangered', label='Jacobi')
+    plt.plot(p_s, iter_counts['Gauss_Seidel'], c='purple', label='Gauss_Seidel')
+
+    mpl_cmap = mpl.colormaps['winter']
     colors = mpl_cmap(np.linspace(0, 1, len(omegas)))
     custom_cmap = ListedColormap(colors)
-    for i, (S, omega) in enumerate(zip(Ss, omegas)):
-        ax3.semilogy(np.arange(1, n_steps+1, 1), S.error_history, c=custom_cmap(i), label=f"$\\omega={omega}$")
-    
-    ax1.set_title("Jacobi Iteration")
-    ax1.set_xlabel("Iteration Number")
-    ax1.set_ylabel("Max Error ($\\epsilon$)")
-    
-    ax2.set_title("Gauss-Seidel Iteration")
-    ax2.set_xlabel("Iteration Number")
-    ax2.set_ylabel("Max Error ($\\epsilon$)")
 
-    ax3.set_title("SOR Iteration")
-    ax3.set_xlabel("Iteration Number")
-    ax3.set_ylabel("Max Error ($\\epsilon$)")
-    ax3.legend(fancybox=True, shadow=True)
+    for i, (omega, iters) in enumerate(iter_counts['SOR'].items()):
+        plt.plot(p_s, iters, c=custom_cmap(i), linestyle="--", label=f'SOR $\\omega = {omega}$')
+
+    plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
+
+    plt.xlabel("p")
+    plt.ylabel("Iterations")
+    plt.legend(fancybox=True, shadow=True)
 
     plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
     plt.show()
 
-def find_optimal_omega(golden_section=False):
+def find_optimal_omega():
     """Find the optimal omega for SOR iteration at different grid sizes."""
-    N_values = [5, 10, 20, 50, 100, 200]
+    N_values = [10, 20, 50, 100, 200, 500]
     epsilon = 1e-5
     min_omega = 1.0
     max_omega = 2.0
@@ -154,26 +145,25 @@ def find_optimal_omega(golden_section=False):
     plt.plot(omegas, iterations.T, marker='o')
     plt.xlabel("$\\omega$")
     plt.ylabel("Number of Iterations to Converge")
-    plt.title("Finding Optimal $\\omega$ for SOR Iteration")
+    plt.title(f"Parameter Sweep for Optimal $\\omega$ ($\\epsilon={epsilon:.0e}$)")
     plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
     plt.savefig("set_1/results/omega_sweep.png", dpi=300)
     plt.show()
-
-    if not golden_section:
-        optimal_omegas = omegas[np.argmin(iterations, axis=1)]
-        for N, optimal_omega in zip(N_values, optimal_omegas):
-            print(f"Optimal omega for N={N}: {optimal_omega:.4f}")
-        return
     
     # golden section search for optimal omega
     n_golden_section = 10
     omegas_gs = [[] for _ in range(len(N_values))]
     iterations_gs = [[] for _ in range(len(N_values))]
     invphi = (np.sqrt(5) - 1) / 2 # 1/phi
+    optimal_omegas = np.zeros(len(N_values))
+    best_omegas = np.zeros(len(N_values))
+    best_iterations = np.zeros(len(N_values))
     for i, N in enumerate(N_values):
         print(f"Running golden section search for N={N}...")
+        x0 = np.zeros((N, N))
+        x0[0, :] = 1
         # find the two omegas that are closest to the optimal omega found in the sweep
         optimal_omega_idx = np.argmin(iterations[i])
         left_bound_idx = max(optimal_omega_idx - 1, 0)
@@ -184,7 +174,6 @@ def find_optimal_omega(golden_section=False):
         omegas_gs[i].append(b)
         iterations_gs[i].append(iterations[i,left_bound_idx])
         iterations_gs[i].append(iterations[i,right_bound_idx])
-        print(f"Initial guess: omega={(a+b)/2:.4f}")
         # iterate until we have done n_golden_section iterations
         for _ in range(n_golden_section):
             c = b - (b - a) * invphi
@@ -205,16 +194,24 @@ def find_optimal_omega(golden_section=False):
                 b = d
             else:
                 a = c
-            print(f"Updated guess: omega={(a+b)/2:.4f}")
-    
-    plt.plot(omegas_gs, iterations_gs, marker='o')
+        # the optimal omega is the midpoint of the final interval [a, b]
+        optimal_omegas[i] = (a + b) / 2
+        # the best omega is the one with the least iterations in the golden section search
+        best_omegas[i] = omegas_gs[i][np.argmin(iterations_gs[i])]
+        best_iterations[i] = np.min(iterations_gs[i])
+    for o, i, N in zip(omegas_gs, iterations_gs, N_values):
+        plt.plot(o, i, marker='o', markersize=3, alpha=0.5, linestyle='--', label=f"N={N}")
+    plt.plot(best_omegas, best_iterations, marker='o', c='black', label="Optimal $\\omega$")
     plt.xlabel("$\\omega$")
     plt.ylabel("Number of Iterations to Converge")
-    plt.title("Finding Optimal $\\omega$ for SOR Iteration")
-    plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
+    plt.title(f"Golden Section Search for Optimal $\\omega$ ($\\epsilon={epsilon:.0e}$)")
+    plt.legend(fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
     plt.savefig("set_1/results/golden_section.png", dpi=300)
+    plt.show()
+
+    return optimal_omegas
 
 def plot_sinks():
     """Plotting convergence for each iterative method including objects in the domain"""
@@ -226,21 +223,21 @@ def plot_sinks():
     radius = 10
     circle_mask = (x - center_x)**2 + (y - center_y)**2 <= radius**2 # Circle in domain
 
-    J = Jacobi(x0)
-    G = GaussSeidel(x0)
+    J = Jacobi(x0.copy())
+    G = GaussSeidel(x0.copy())
 
     omegas = [1.0, 1.3, 1.6, 1.8, 1.9]
     Ss = [SOR(x0.copy(), omega=omega) for omega in omegas]
 
-    J.objects(circle_mask, value=0.0)
-    G.objects(circle_mask, value=0.0)
+    J.objects(circle_mask)
+    G.objects(circle_mask)
 
     for S in Ss:
-        S.objects(circle_mask, value=0.0)
+        S.objects(circle_mask)
 
-    sol_J = J.run(n_steps)
-    sol_G = G.run(n_steps)
-    sol_S = [S.run(n_steps) for S in Ss]
+    J.run(n_steps)
+    G.run(n_steps)
+    [S.run(n_steps) for S in Ss]
 
     # init figure
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18,6), constrained_layout=True)
@@ -288,9 +285,9 @@ def animate_sinks():
     G = GaussSeidel(x0, save_every= 1)
     S = SOR(x0, save_every= 1, omega = 1.8) 
 
-    J.objects(circle_mask, value=0.0)
-    G.objects(circle_mask, value=0.0)
-    S.objects(circle_mask, value=0.0)
+    J.objects(circle_mask)
+    G.objects(circle_mask)
+    S.objects(circle_mask)
 
     sol_J = J.run(n_steps)
     sol_G = G.run(n_steps)
@@ -304,7 +301,7 @@ def animate_sinks():
 
     ax1.set_title("Jacobi")
     ax2.set_title("Gauss-Seidel")
-    ax3.set_title("SOR ($\omega=1.8$)")
+    ax3.set_title("SOR ($\\omega=1.8$)")
 
     def update(i):
         im1.set_data(J.x_arr[..., min(i, J.x_arr.shape[-1]-1)])
@@ -419,7 +416,7 @@ def main():
     elif args.question == 'I':
         plot_convergence_measures()
     elif args.question == 'J':
-        find_optimal_omega(True)
+        find_optimal_omega()
     elif args.question == 'K':
         my_mask = complex_mask()
         final_field = conc_field(my_mask)

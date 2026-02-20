@@ -1,23 +1,27 @@
-import numpy as np
 from warnings import warn
+
+import numpy as np
 from scipy.signal import convolve2d
+
 
 class GeneralTIDE(): # TIDE: time-independent diffusion equation
     "Base class for iterative methods"
-    def __init__(self, x0: np.ndarray, save_every: int = 1):
+    def __init__(self, x0: np.ndarray, save_every: int = 0, save_error: bool = False):
         self.x = x0
         self.constants = dict()
 
         self.save_every = save_every
-        self.x_arr = x0.astype(np.float16).copy()[..., None]
+        if save_every: self.x_arr = x0.astype(np.float16).copy()[..., None]
+        
+        self.save_error = save_error
+        if save_error: self.error_history = []
         
         self.iter_count = 0
-        self.error_history = [] 
 
-        self.obj_map = np.zeros_like(x0, dtype=int)
-        self.obj_val = 0.0
+        # initialize an obj_mask with no objects
+        self.obj_mask = np.full_like(x0, 0.25, dtype=float)
 
-    def _update_func(self):
+    def _update_func(self) -> float:
         """Should contain the logic to update the x by one step"""
         raise(NotImplementedError)
     
@@ -25,14 +29,15 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         """Perform a step and save error to error_history"""
         error = self._update_func()
         self.iter_count += 1
-        
-        # error history
-        self.error_history.append(error)
 
         # saving logic
         if self.save_every and (self.iter_count % self.save_every == 0):
              new = self.x.copy()[..., None]
              self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
+
+        # error history
+        if self.save_error:
+            self.error_history.append(error)
         
         return error
 
@@ -98,15 +103,12 @@ class Jacobi(GeneralTIDE):
         if use_jit:
             self._setup_jit()
     
-    def _update_func(self):
-        x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+    def _update_func(self) -> float:
+        x_next = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
         self.x[1:-1, :] = x_next
-
-        # For objects
-        self.x[self.obj_map == 1] = self.obj_val
 
         return error
         
@@ -114,7 +116,7 @@ class Jacobi(GeneralTIDE):
         from .optimized import jacobi_jit
         self._x_next = self.x.copy()
         def jit_wrapper() -> float:
-            error = jacobi_jit(self.x, self._x_next)
+            error = jacobi_jit(self.x, self._x_next, self.obj_mask)
             
             # swap references for next iteration
             old_x = self.x
@@ -133,22 +135,22 @@ class GaussSeidel(GeneralTIDE):
         if use_jit:
             self._setup_jit()
         else:
-            self.red_mask = (np.indices(self.x.shape).sum(axis=0) % 2) == 0
-            self.black_mask = ~self.red_mask
+            red_mask = (np.indices(self.x.shape).sum(axis=0) % 2) == 0
+            black_mask = ~red_mask
+            red_mask = red_mask[1:-1, :]
+            black_mask = black_mask[1:-1, :]
+            red_mask[:, -1] = False # avoid updating the rightmost column to prevent double update
+            black_mask[:, -1] = False
+            self.red_mask = red_mask
+            self.black_mask = black_mask
 
-    def _update_mask(self, mask: np.ndarray) -> None:
-        x_next = 0.25 * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+    def _update_mask(self, mask: np.ndarray) -> float:
+        x_next = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
                + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
                 + self.x[2:, :] + self.x[:-2, :])
         
         error = np.max(np.abs(x_next - self.x[1:-1, :]))
-        inner_mask = mask[1:-1, :]
-        # avoid updating the rightmost column to prevent double update
-        inner_mask[:, -1] = False
-        self.x[1:-1, :][inner_mask] = x_next[inner_mask]
-
-        # For objects
-        self.x[self.obj_map == 1] = self.obj_val
+        self.x[1:-1, :][mask] = x_next[mask]
 
         # enforce periodicity condition for the rightmost column
         self.x[1:-1, -1] = self.x[1:-1, 0]
@@ -163,7 +165,7 @@ class GaussSeidel(GeneralTIDE):
         from .optimized import gauss_seidel_jit
         
         def jit_wrapper() -> float:
-            error = gauss_seidel_jit(self.x)
+            error = gauss_seidel_jit(self.x, self.obj_mask)
             return error
             
         self._update_func = jit_wrapper
@@ -174,32 +176,30 @@ class SOR(GaussSeidel):
         super().__init__(x0, save_every, use_jit)
         self.omega = omega
         
-    def _update_mask(self, mask: np.ndarray) -> None:
-        w = self.omega
+    def _update_mask(self, mask: np.ndarray) -> float:
+        # Use the omega value defined in __init__
+        w = self.omega if self.omega is not None else 1.0
         
-        neighbor_sum = 0.25 * (self.x[1:-1, 2:] + self.x[1:-1, :-2] + 
-                               self.x[2:, 1:-1] + self.x[:-2, 1:-1])
+        neighbor_sum = self.obj_mask[1:-1, :] * (np.hstack([self.x[1:-1, 1:], self.x[1:-1, 1][:, None]]) \
+                       + np.hstack([self.x[1:-1, -2][:, None], self.x[1:-1, :-1]]) \
+                       + self.x[2:, :] + self.x[:-2, :])
         
-        x_inner = self.x[1:-1, 1:-1]
-        x_next = w * neighbor_sum + (1 - w) * x_inner
-        
-        valid_pixels = ~mask[1:-1, 1:-1]
-        x_inner[valid_pixels] = x_next[valid_pixels]
-
-        if self.obj_map is not None:
-            self.x[self.obj_map == 1] = self.obj_val
+        x_next = w * neighbor_sum + (1 - w) * self.x[1:-1, :]
+        error = np.max(np.abs(x_next - self.x[1:-1, :]))
+        self.x[1:-1, :][mask] = x_next[mask]
 
         self.x[-1, :] = 1.0 
         self.x[0, :] = 0.0  
 
-        error = np.max(np.abs(x_next[valid_pixels] - x_inner[valid_pixels]))
+         # enforce periodicity condition for the rightmost column
+        self.x[1:-1, -1] = self.x[1:-1, 0]
         return error
     
     def _setup_jit(self):
         from .optimized import sor_jit
         
         def jit_wrapper() -> float:
-            error = sor_jit(self.x, self.omega)
+            error = sor_jit(self.x, self.omega, self.obj_mask)
             return error
             
         self._update_func = jit_wrapper

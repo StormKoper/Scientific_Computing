@@ -104,8 +104,13 @@ def test_obj_circle():
     radius = 15
     circle_mask = (x - center_x)**2 + (y - center_y)**2 <= radius**2
     x0 = np.zeros((N, N))
-    solver = Jacobi(x0)
-
-    solver.objects(circle_mask, value=0.0)
-    sol = solver.run(n_iters=1000)
+    J = Jacobi(x0.copy())
+    J.objects(circle_mask)
+    J.run(n_iters=10)
+    J_jit = Jacobi(x0.copy(), use_jit=True)
+    J_jit.objects(circle_mask)
+    J_jit.run(n_iters=10)
+    assert np.allclose(J.x[circle_mask], 0.0)
+    assert np.allclose(J_jit.x[circle_mask], 0.0)
+    assert np.allclose(J.x, J_jit.x)
 
