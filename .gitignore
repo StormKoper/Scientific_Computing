@@ -4,3 +4,5 @@ __pycache__/
 *.png
 .*
 !.gitkeep
+!difficult_objects.png
+!drain.png

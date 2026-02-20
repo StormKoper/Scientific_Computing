@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -8,8 +9,11 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.colors import ListedColormap
 
 from ..utils.config import *  # noqa: F403
+from ..utils.misc import load_target_image
 from ..utils.TIDE import SOR, GaussSeidel, Jacobi
 
+# getting root directory of set_1
+SET1_ROOT = Path(__file__).parent.parent
 
 def parse_args() -> argparse.Namespace:
     """Parse the arguments
@@ -273,7 +277,7 @@ def animate_sinks():
     n_steps = 1000
     
     x0 = np.zeros((N, N)) 
-    x0[-1, :] = 1.0 # Top row fixed at C=1
+    x0[0, :] = 1.0 # Top row fixed at C=1
 
     # Introduce objects
     y, x = np.ogrid[:N, :N]
@@ -336,25 +340,24 @@ def complex_mask():
     mask = circle_mask | square_mask | triangle_mask
     return mask
 
-def conc_field(mask):
+def plot_conc_field(mask):
     """Produce a diffusion plot for any shape under the SOR method"""
     Ny, Nx= mask.shape
-    n_steps = 10000
+    n_steps = 2000
 
     x0 = np.zeros((Ny, Nx)) 
-    x0[-1, :] = 1.0 # Top row fixed at C=1
-    x0[0, :] = 0.0
+    x0[0, :] = 1.0 # Top row fixed at C=1
 
-    S = SOR(x0.copy(), save_every= 1, omega = 1.8) # Update for optimal omega level
+    S = SOR(x0.copy(), save_every= 1, omega = 1.8, use_jit=True) # Update for optimal omega level
     S.objects(mask)
 
     sol_S = S.run(n_steps)
 
     # Animation plot
     fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)    
-    im = ax.imshow(S.x_arr[..., 0], origin="lower", cmap='magma', vmin=0, vmax=1)
+    im = ax.imshow(S.x_arr[..., 0], cmap='magma', vmin=0, vmax=1)
 
-    ax.set_title("SOR Iteration ($\omega=1.8$) with Sink")
+    ax.set_title("SOR Iteration ($\\omega=1.8$) with Sink")
     ax.set_xlabel("Space (x)")
     ax.set_ylabel("Space (y)")
     plt.colorbar(im, label='Concentration (C)')
@@ -374,7 +377,7 @@ def conc_field(mask):
     # Take the last frame 
     final_frame = S.x_arr[..., -1]
     
-    im_snap = ax_snap.imshow(final_frame, origin="lower", cmap='magma', vmin=0, vmax=1)
+    im_snap = ax_snap.imshow(final_frame, cmap='magma', vmin=0, vmax=1)
     plt.colorbar(im_snap, label='Concentration (C)')
     
     ax_snap.set_title("Steady-State Solution (Final Frame)")
@@ -385,19 +388,18 @@ def conc_field(mask):
 
 def plot_insulation(mask):
     Ny, Nx= mask.shape
-    n_steps = 10000
+    n_steps = 500
 
     x0 = np.zeros((Ny, Nx)) 
-    x0[-1, :] = 1.0 # Top row fixed at C=1
-    x0[0, :] = 0.0
+    x0[0, :] = 1.0 # Top row fixed at C=1
 
-    solver = SOR(x0, use_jit=True, save_every = 2)
+    solver = SOR(x0, use_jit=True, save_every = 1)
     solver.objects(mask, insulation=True)
 
     solver.run(n_steps)
 
     fig, ax = plt.subplots(figsize=(6, 6))
-    artist = ax.imshow(solver.x_arr[..., -1], origin="lower", cmap='magma', vmin=0, vmax=1)
+    artist = ax.imshow(solver.x_arr[..., -1], cmap='magma', vmin=0, vmax=1)
     plt.show()
 
 def main():
@@ -418,10 +420,14 @@ def main():
     elif args.question == 'J':
         find_optimal_omega()
     elif args.question == 'K':
-        my_mask = complex_mask()
-        final_field = conc_field(my_mask)
+        img_path = SET1_ROOT / "images/drain.png"
+        my_mask = load_target_image(img_path, 50)
+        #my_mask = complex_mask()
+        final_field = plot_conc_field(my_mask)
     elif args.question == 'L':
-        my_mask = complex_mask()
+        img_path = SET1_ROOT / "images/difficult_objects.png"
+        my_mask = load_target_image(img_path, 50)
+        # my_mask = complex_mask()
         insul_field = plot_insulation(my_mask)
     else:
         raise ValueError(f"Invalid question choice: {args.question}")

@@ -113,7 +113,7 @@ def plot_states() -> None:
 
     # init wave
     x0 = np.zeros((N, N))
-    x0[-1, :] = 1
+    x0[0, :] = 1
     wave = Wave2D(x0, dt, dx, D=1.0, save_every=1)
 
     # run for required steps
@@ -129,7 +129,7 @@ def plot_states() -> None:
         t_index = round(t / wave.dt)
         true_t = t_index * wave.dt
 
-        im = ax.imshow(wave.x_arr[..., t_index], origin="lower")
+        im = ax.imshow(wave.x_arr[..., t_index])
         ax.set_title(f"t={true_t:.4f}")
         ax.set_ylabel("y")
         ax.set_xlabel("x")
@@ -150,7 +150,7 @@ def animate_grid() -> None:
 
     # init wave
     x0 = np.zeros((N, N))
-    x0[-1, :] = 1
+    x0[0, :] = 1
     wave = Wave2D(x0, dt, dx, D=1.0, save_every=1)
 
     # run to t=1
@@ -158,7 +158,7 @@ def animate_grid() -> None:
     wave.run(total_steps)
 
     fig = plt.figure(constrained_layout=True)
-    artist = plt.imshow(wave.x_arr[..., 0], origin="lower")
+    artist = plt.imshow(wave.x_arr[..., 0])
     ax = plt.gca()
     ax.set_aspect('equal')
     title = ax.set_title("Wave Animation (t = 0.0000)")
