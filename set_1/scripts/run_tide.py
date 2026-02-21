@@ -127,9 +127,13 @@ def plot_convergence_measures():
     plt.suptitle(f"Convergence Speed of 3 Iteration Methods ({N}x{N}-grid)")
     plt.show()
 
-def find_optimal_omega():
+def find_optimal_omega(mask: np.ndarray|None = None, insulation: bool = False):
     """Find the optimal omega for SOR iteration at different grid sizes."""
-    N_values = [10, 20, 50, 100, 200, 500]
+    if mask is not None:
+        N_values = [mask.shape[0]]
+    else:
+        N_values = [10, 20, 50, 100, 200, 500]
+
     epsilon = 1e-5
     min_omega = 1.0
     max_omega = 2.0
@@ -139,14 +143,17 @@ def find_optimal_omega():
     omegas = np.linspace(min_omega, max_omega, n_sweep)
     omegas[-1] = 1.99  # to avoid divergence at omega=2.0
     iterations = np.zeros((len(N_values), n_sweep))
+    
     for i, N in enumerate(N_values):
-        print(f"Running omega sweep for N={N}...")
+        print(f"\rCurrently running omega sweep for N={N}...", end="")
         x0 = np.zeros((N, N))
         x0[0, :] = 1
         Ss = [SOR(x0.copy(), save_every=0, omega=omega, use_jit=True) for omega in omegas]
+        if mask is not None:
+            [S.objects(mask, insulation) for S in Ss]
         [S.run(epsilon=epsilon) for S in Ss]
         iterations[i, :] = [S.iter_count for S in Ss]
-        
+
     plt.plot(omegas, iterations.T, marker='o')
     plt.xlabel("$\\omega$")
     plt.ylabel("Number of Iterations to Converge")
@@ -154,7 +161,6 @@ def find_optimal_omega():
     plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
-    plt.savefig(SET1_ROOT / "results/omega_sweep.png", dpi=300)
     plt.show()
     
     # golden section search for optimal omega
@@ -165,8 +171,9 @@ def find_optimal_omega():
     optimal_omegas = np.zeros(len(N_values))
     best_omegas = np.zeros(len(N_values))
     best_iterations = np.zeros(len(N_values))
+    
     for i, N in enumerate(N_values):
-        print(f"Running golden section search for N={N}...")
+        print(f"\rCurrently running golden section search for N={N}...", end="")
         x0 = np.zeros((N, N))
         x0[0, :] = 1
         # find the two omegas that are closest to the optimal omega found in the sweep
@@ -187,6 +194,10 @@ def find_optimal_omega():
             S_c = SOR(x0.copy(), save_every=0, omega=c, use_jit=True)
             S_d = SOR(x0.copy(), save_every=0, omega=d, use_jit=True)
 
+            if mask is not None:
+                S_c.objects(mask, insulation)
+                S_d.objects(mask, insulation)
+
             S_c.run(epsilon=epsilon)
             S_d.run(epsilon=epsilon)
 
@@ -204,6 +215,7 @@ def find_optimal_omega():
         # the best omega is the one with the least iterations in the golden section search
         best_omegas[i] = omegas_gs[i][np.argmin(iterations_gs[i])]
         best_iterations[i] = np.min(iterations_gs[i])
+
     for o, i, N in zip(omegas_gs, iterations_gs, N_values):
         plt.plot(o, i, marker='o', markersize=3, alpha=0.5, linestyle='--', label=f"N={N}")
     plt.plot(best_omegas, best_iterations, marker='o', c='black', label="Optimal $\\omega$")
@@ -213,8 +225,16 @@ def find_optimal_omega():
     plt.legend(fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
-    plt.savefig(SET1_ROOT / "results/golden_section.png", dpi=300)
     plt.show()
+
+    # print a little table in terminal of best omega's and
+    # corresponding inters
+    print("\r\033[K" + "-"*59)
+    print(f"|{'Grid Size':^15}|{'Best Omegas':^20}|{'Number of Iters':^20}|")
+    print("-"*59)
+    for N, omega, iter in zip(N_values, best_omegas, best_iterations):
+        print(f"|{N:^15}|{omega:^20.5f}|{int(iter):^20}|")
+    print("-"*59)
 
     return optimal_omegas
 
@@ -429,11 +449,13 @@ def main():
         my_mask = load_target_image(img_path, 50)
         _ = plot_conc_field(my_mask)
         _ = animate_conc_field(my_mask)
+        _ = find_optimal_omega(my_mask)
     elif args.question == 'L':
         img_path = SET1_ROOT / "images/difficult_objects.png"
         my_mask = load_target_image(img_path, 50)
         _ = plot_conc_field(my_mask, True)
         _ = animate_conc_field(my_mask, True)
+        _ = find_optimal_omega(my_mask, True)
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
