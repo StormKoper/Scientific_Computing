@@ -11,7 +11,9 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
         self.constants = dict()
 
         self.save_every = save_every
-        if save_every: self.x_arr = x0.astype(np.float16).copy()[..., None]
+        if save_every:
+            self._frames = [x0.astype(np.float16).copy()] 
+            self.x_arr = None
         
         self.save_error = save_error
         if save_error: self.error_history = []
@@ -32,8 +34,7 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
 
         # saving logic
         if self.save_every and (self.iter_count % self.save_every == 0):
-             new = self.x.copy()[..., None]
-             self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
+             self._frames.append(self.x.astype(np.float16).copy())
 
         # error history
         if self.save_error:
@@ -56,6 +57,9 @@ class GeneralTIDE(): # TIDE: time-independent diffusion equation
             error = float('inf')
             while error > epsilon:
                 error = self._step()
+        
+        if self.save_every:
+            self.x_arr = np.stack(self._frames, axis=-1)
 
     def objects(self, mask_indices: np.ndarray, insulation: bool = False):
         """Initialize objects in the grid.

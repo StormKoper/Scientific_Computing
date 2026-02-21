@@ -1,4 +1,5 @@
 import argparse
+import itertools
 from pathlib import Path
 
 import matplotlib as mpl
@@ -340,66 +341,70 @@ def complex_mask():
     mask = circle_mask | square_mask | triangle_mask
     return mask
 
-def plot_conc_field(mask):
+def plot_conc_field(mask: np.ndarray, insulation: bool=False):
     """Produce a diffusion plot for any shape under the SOR method"""
-    Ny, Nx= mask.shape
-    n_steps = 2000
+    N, _ = mask.shape
+    dt = (1/N)**2 * 0.25 # since we'll use Jacobi
 
-    x0 = np.zeros((Ny, Nx)) 
+    x0 = np.zeros((N, N)) 
     x0[0, :] = 1.0 # Top row fixed at C=1
 
-    S = SOR(x0.copy(), save_every= 1, omega = 1.8, use_jit=True) # Update for optimal omega level
-    S.objects(mask)
+    t_s = [0, 0.001, 0.01, 0.1, 1.0]
+    total_steps = int(np.ceil(max(t_s) / dt))
 
-    sol_S = S.run(n_steps)
+    J = Jacobi(x0, use_jit=True)
+    J.objects(mask, insulation)
+    J.run(total_steps)
+
+    fig, axes = plt.subplots(1, 5, figsize=(18, 5), constrained_layout=True)
+    
+    for ax, t in itertools.zip_longest(axes.flatten(), t_s):
+        if t is None:
+            ax.set_visible(False)
+            continue
+        t_index = round(t / dt)
+        true_t = t_index * dt
+
+        im = ax.imshow(J.x_arr[..., t_index])
+        ax.set_title(f"t={true_t:.4f}")
+        ax.set_ylabel("y")
+        ax.set_xlabel("x")
+    
+    fig.colorbar(im, ax=axes.ravel().tolist(), shrink=0.8, orientation='horizontal')
+    plt.suptitle("2D Heatmap of Concentration Values at Various Time Steps")
+    plt.show()
+
+def animate_conc_field(mask, insulation: bool = False):
+    N, _ = mask.shape
+    dt = (1/N)**2 * 0.25 # since we'll use Jacobi
+
+    x0 = np.zeros((N, N)) 
+    x0[0, :] = 1.0 # Top row fixed at C=1
+
+    total_steps = int(np.ceil(1 / dt))
+
+    J = Jacobi(x0, use_jit=True, save_every=10)
+    J.objects(mask, insulation)
+    J.run(total_steps)
 
     # Animation plot
-    fig, ax = plt.subplots(figsize=(6, 6), constrained_layout=True)    
-    im = ax.imshow(S.x_arr[..., 0], cmap='magma', vmin=0, vmax=1)
-
-    ax.set_title("SOR Iteration ($\\omega=1.8$) with Sink")
+    fig, ax = plt.subplots(figsize=(8, 8), constrained_layout=True)    
+    im = ax.imshow(J.x_arr[..., 0], cmap='viridis', vmin=0, vmax=1)
+    ax.set_aspect('equal')
+    title = ax.set_title("Diffusion Animation (t = 0.000)")
     ax.set_xlabel("Space (x)")
     ax.set_ylabel("Space (y)")
-    plt.colorbar(im, label='Concentration (C)')
+
+    plt.colorbar(im, label='Concentration (C)', fraction=0.05, pad=0.04)
 
     def update(i):
-        im.set_data(S.x_arr[..., i])
-        return (im,)
+        im.set_data(J.x_arr[..., i])
+        title.set_text(f"Diffusion Animation (t = {i * 10 * dt:.3f})")
+        return (im, title)
 
-    frames = S.x_arr.shape[-1]
+    frames = J.x_arr.shape[-1]
 
-    ani = FuncAnimation(fig, update, frames=frames, interval=20, blit=True)
-    plt.show()
-
-    # Plot at final step
-    fig_snap, ax_snap = plt.subplots(figsize=(6, 6))
-    
-    # Take the last frame 
-    final_frame = S.x_arr[..., -1]
-    
-    im_snap = ax_snap.imshow(final_frame, cmap='magma', vmin=0, vmax=1)
-    plt.colorbar(im_snap, label='Concentration (C)')
-    
-    ax_snap.set_title("Steady-State Solution (Final Frame)")
-    ax_snap.set_xlabel("Space (x)")
-    ax_snap.set_ylabel("Space (y)")
-    
-    plt.show()
-
-def plot_insulation(mask):
-    Ny, Nx= mask.shape
-    n_steps = 500
-
-    x0 = np.zeros((Ny, Nx)) 
-    x0[0, :] = 1.0 # Top row fixed at C=1
-
-    solver = SOR(x0, use_jit=True, save_every = 1)
-    solver.objects(mask, insulation=True)
-
-    solver.run(n_steps)
-
-    fig, ax = plt.subplots(figsize=(6, 6))
-    artist = ax.imshow(solver.x_arr[..., -1], cmap='magma', vmin=0, vmax=1)
+    _ = FuncAnimation(fig, update, frames=frames, interval=1, blit=False)
     plt.show()
 
 def main():
@@ -420,15 +425,15 @@ def main():
     elif args.question == 'J':
         find_optimal_omega()
     elif args.question == 'K':
-        img_path = SET1_ROOT / "images/drain.png"
+        img_path = SET1_ROOT / "images/difficult_objects.png"
         my_mask = load_target_image(img_path, 50)
-        #my_mask = complex_mask()
-        final_field = plot_conc_field(my_mask)
+        _ = plot_conc_field(my_mask)
+        _ = animate_conc_field(my_mask)
     elif args.question == 'L':
         img_path = SET1_ROOT / "images/difficult_objects.png"
         my_mask = load_target_image(img_path, 50)
-        # my_mask = complex_mask()
-        insul_field = plot_insulation(my_mask)
+        _ = plot_conc_field(my_mask, True)
+        _ = animate_conc_field(my_mask, True)
     else:
         raise ValueError(f"Invalid question choice: {args.question}")
 
