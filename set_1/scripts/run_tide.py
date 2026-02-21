@@ -136,12 +136,11 @@ def find_optimal_omega(mask: np.ndarray|None = None, insulation: bool = False):
 
     epsilon = 1e-5
     min_omega = 1.0
-    max_omega = 2.0
+    max_omega = 1.999 # just below divergence at omega=2.0
 
     # sweep over omegas for each N
     n_sweep = 11
     omegas = np.linspace(min_omega, max_omega, n_sweep)
-    omegas[-1] = 1.99  # to avoid divergence at omega=2.0
     iterations = np.zeros((len(N_values), n_sweep))
     
     for i, N in enumerate(N_values):
@@ -154,13 +153,13 @@ def find_optimal_omega(mask: np.ndarray|None = None, insulation: bool = False):
         [S.run(epsilon=epsilon) for S in Ss]
         iterations[i, :] = [S.iter_count for S in Ss]
 
+    plt.figure(figsize=(8,6), constrained_layout=True)
     plt.plot(omegas, iterations.T, marker='o')
     plt.xlabel("$\\omega$")
     plt.ylabel("Number of Iterations to Converge")
     plt.title(f"Parameter Sweep for Optimal $\\omega$ ($\\epsilon={epsilon:.0e}$)")
     plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
-    plt.tight_layout()
     plt.show()
     
     # golden section search for optimal omega
@@ -216,6 +215,7 @@ def find_optimal_omega(mask: np.ndarray|None = None, insulation: bool = False):
         best_omegas[i] = omegas_gs[i][np.argmin(iterations_gs[i])]
         best_iterations[i] = np.min(iterations_gs[i])
 
+    plt.figure(figsize=(8, 6), constrained_layout=True)
     for o, i, N in zip(omegas_gs, iterations_gs, N_values):
         plt.plot(o, i, marker='o', markersize=3, alpha=0.5, linestyle='--', label=f"N={N}")
     plt.plot(best_omegas, best_iterations, marker='o', c='black', label="Optimal $\\omega$")
@@ -224,7 +224,6 @@ def find_optimal_omega(mask: np.ndarray|None = None, insulation: bool = False):
     plt.title(f"Golden Section Search for Optimal $\\omega$ ($\\epsilon={epsilon:.0e}$)")
     plt.legend(fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
-    plt.tight_layout()
     plt.show()
 
     # print a little table in terminal of best omega's and
