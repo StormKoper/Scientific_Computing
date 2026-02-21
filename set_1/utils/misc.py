@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from math import erfc
 from pathlib import Path
 
@@ -26,6 +27,22 @@ def analytical_concentration(y: float, t: float, D: float, sum_iters: int = 1000
         total += erfc(left_erfc_input) - erfc(right_erfc_input)
     
     return total
+
+# NOT FINALIZED, IDK YET HOW TO ALTER FOR OUR DIRICHELET BOUNDARIES
+def analytical_1D_wave(x: np.ndarray, t: float, f: Callable, c: float = 1.0) -> np.ndarray:
+    """NOT FINALIZED, IDK YET HOW TO ALTER FOR OUR DIRICHELET BOUNDARIES
+    
+    Calculate the analytical amplitude of a 1D wave.
+    Function is based on solution by d'Alembert ommiting initial velocity component.
+    
+    Args:
+        - x (np.ndarray): Points in 1D space to calculate the amplitude for.
+        - t (float): Time at which to calculate amplitude.
+        - f (Callable): Function that was used to create initial condition X0.
+        - c (float): Propagation velocity of wave.
+    
+    """
+    return 0.5 * (f(x - c*t) + f(x + c*t))
 
 def load_target_image(image_path: Path, grid_size: int) -> np.ndarray:
     """Load an image, to utilize as a mask for objects

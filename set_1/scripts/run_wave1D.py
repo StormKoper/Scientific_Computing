@@ -11,7 +11,8 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 
 from ..utils.config import *  # noqa: F403
-from ..utils.wave import Wave1D, Leapfrog
+from ..utils.misc import analytical_1D_wave
+from ..utils.wave import Leapfrog, Wave1D
 
 
 def parse_args() -> argparse.Namespace:
@@ -87,6 +88,44 @@ def animate_wave(x_arr: np.ndarray,
     anim = FuncAnimation(fig, update, frames=x_arr.shape[-1], interval=interval, blit=True)
     plt.show()
 
+def plot_normal_vs_leapfrog():
+    dx = 0.001
+    dt = 0.001
+    c = 1.0
+    n_steps = 2000
+
+    x = np.linspace(0, 1, int(1 / dx) + 1)
+    f = lambda x: np.sin(2*np.pi*x)  # noqa: E731
+    x0 = f(x)
+
+    normal = Wave1D(x0.copy(), dt, dx, c=1.0, save_every=1, use_jit=True)
+    normal.run(n_steps - 1)
+
+    leapfrog = Leapfrog(x0.copy(), dt, dx, c=1.0, save_every=1, use_jit=True)
+    leapfrog.run(n_steps - 1)
+
+    t_arr = np.arange(n_steps) * dt
+    analytical = np.array([analytical_1D_wave(x, t, f, c=c) for t in t_arr]).T
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,6), constrained_layout=True)
+
+    ax1.plot(t_arr, np.max(np.abs(analytical - normal.x_arr), axis=0), 
+             c="firebrick", label="Normal Method")
+    ax1.plot(t_arr, np.max(np.abs(analytical - leapfrog.x_arr), axis=0),
+             c="darkcyan", label="Leapfrog Method")
+    ax1.legend(fancybox=True, shadow=True)
+    ax1.set_xlabel("Time (t)")
+    ax1.set_ylabel("Max Absolute Error")
+
+    ax2.plot(t_arr, np.max(analytical, axis=0), c="black", linestyle=":", label="Analytical Truth")
+    ax2.plot(t_arr, np.max(normal.x_arr, axis=0), c="firebrick", label="Normal Method")
+    ax2.plot(t_arr, np.max(leapfrog.x_arr, axis=0), c="darkcyan", label="Leapfrog Method")
+    ax2.legend(fancybox=True, shadow=True)
+    ax2.set_xlabel("Time (t)")
+    ax2.set_ylabel("Max Amplitude")
+
+    plt.show()
+
 def main():
     """The entry point when run as a script.
     
@@ -117,7 +156,6 @@ def main():
     if args.animate:
         wave.run(args.steps)
         animate_wave(wave.x_arr, interval=10)
-    
     else:
         wave.run(args.steps)
 

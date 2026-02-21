@@ -1,5 +1,7 @@
-import numpy as np
 from warnings import warn
+
+import numpy as np
+
 
 class GeneralWave():
     """Base class for the wave equation solvers"""
@@ -9,7 +11,8 @@ class GeneralWave():
         self.dt = dt
         self.constants = dict()
         self.save_every = save_every
-        self.x_arr = x0.astype(np.float16).copy()[..., None]
+        self._frames = [x0.astype(np.float16).copy()] 
+        self.x_arr = None
 
     def _update_func(self):
         """Should contain the logic to update the x by one step"""
@@ -21,7 +24,8 @@ class GeneralWave():
             self._update_func()
             if self.save_every and (n % self.save_every == 0):
                 new = self.x.astype(np.float16).copy()[..., None]
-                self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
+                self._frames.append(self.x.astype(np.float16).copy())
+        self.x_arr = np.stack(self._frames, axis=-1)
 
 class Wave1D(GeneralWave):
     """1D wave equation solver using finite difference method"""
