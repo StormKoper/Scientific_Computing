@@ -9,6 +9,20 @@ def wave_1d_jit(x: np.ndarray, x_prev: np.ndarray, x_next: np.ndarray, C2: float
         x_next[i] = C2 * (x[i-1] - 2*x[i] + x[i+1]) - x_prev[i] + 2*x[i]
 
 @njit(parallel=True, fastmath=True)
+def leapfrog_jit(x: np.ndarray, v: np.ndarray, a: np.ndarray, dt: float, cdx: float) -> None:
+    """Optimized leapfrog method for 1D wave equation using numba JIT compilation and parallelization."""
+    # precalculate half_dt for efficiency
+    half_dt = 0.5 * dt
+    # use i-1 indexing for v and a since they are defined on the interior points only
+    for i in prange(1, x.shape[0] - 1):
+        v[i-1] = v[i-1] + half_dt * a[i-1]
+        x[i] = x[i] + dt * v[i-1]
+    # wait for all threads to finish updating x before calculating new a
+    for i in prange(1, x.shape[0] - 1):
+        a[i-1] = cdx * (x[i-1] - 2*x[i] + x[i+1])
+        v[i-1] = v[i-1] + half_dt * a[i-1]
+
+@njit(parallel=True, fastmath=True)
 def wave_2d_jit(x: np.ndarray, x_next: np.ndarray, d: float) -> None:
     """Optimized 2D wave equation solver using finite difference method with numba JIT compilation and parallelization."""
     for i in prange(1, x.shape[0] - 1):

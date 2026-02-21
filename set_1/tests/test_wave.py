@@ -1,5 +1,5 @@
 import numpy as np
-from utils.wave import Wave1D, Wave2D
+from utils.wave import Wave1D, Leapfrog, Wave2D
 
 x1D = np.linspace(0, 1, 25)
 x1D = np.sin(2*np.pi*x1D)
@@ -11,6 +11,12 @@ x2D[0, :] = 1 # y=1 is index 0
 
 def test1D():
     mywave = Wave1D(x1D.copy(), 0.001, 0.04)
+    mywave.run(10)
+
+    assert np.allclose([mywave.x[0], mywave.x[-1]], 0) # boundary conditions
+
+def testLeapfrog():
+    mywave = Leapfrog(x1D.copy(), 0.001, 0.04)
     mywave.run(10)
 
     assert np.allclose([mywave.x[0], mywave.x[-1]], 0) # boundary conditions
@@ -29,6 +35,12 @@ def test1D_jit():
 
     assert np.allclose([mywave.x[0], mywave.x[-1]], 0) # boundary conditions
 
+def testLeapfrog_jit():
+    mywave = Leapfrog(x1D.copy(), 0.001, 0.04, use_jit=True)
+    mywave.run(10)
+
+    assert np.allclose([mywave.x[0], mywave.x[-1]], 0) # boundary conditions
+
 def test2D_jit():
     mywave = Wave2D(x2D.copy(), 0.0001, 0.04, use_jit=True)
     mywave.run(10)
@@ -40,6 +52,14 @@ def test2D_jit():
 def test1D_equivalence():
     mywave = Wave1D(x1D.copy(), 0.001, 0.04)
     mywave_jit = Wave1D(x1D.copy(), 0.001, 0.04, use_jit=True)
+    mywave.run(10)
+    mywave_jit.run(10)
+
+    assert np.allclose(mywave.x, mywave_jit.x)
+
+def testLeapfrog_equivalence():
+    mywave = Leapfrog(x1D.copy(), 0.001, 0.04)
+    mywave_jit = Leapfrog(x1D.copy(), 0.001, 0.04, use_jit=True)
     mywave.run(10)
     mywave_jit.run(10)
 

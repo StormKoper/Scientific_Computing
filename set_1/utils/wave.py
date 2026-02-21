@@ -3,17 +3,13 @@ from warnings import warn
 
 class GeneralWave():
     """Base class for the wave equation solvers"""
-    def __init__(self, x0: np.ndarray, dt: float, dx: float, save_every: int = 1):
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, save_every: int = 0):
         self.x = x0
         self.dx = dx
         self.dt = dt
         self.constants = dict()
         self.save_every = save_every
         self.x_arr = x0.astype(np.float16).copy()[..., None]
-
-    def _first_step(self):
-        """This completse the first step based on single sided scheme"""
-        raise(NotImplementedError)
 
     def _update_func(self):
         """Should contain the logic to update the x by one step"""
@@ -27,10 +23,9 @@ class GeneralWave():
                 new = self.x.astype(np.float16).copy()[..., None]
                 self.x_arr = np.concatenate((self.x_arr, new), axis=-1)
 
-
 class Wave1D(GeneralWave):
     """1D wave equation solver using finite difference method"""
-    def __init__(self, x0: np.ndarray, dt: float, dx: float, c: float = 1.0, save_every: int = 1, use_jit: bool = False):
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, c: float = 1.0, save_every: int = 0, use_jit: bool = False):
         super().__init__(x0, dt, dx, save_every)
         self.constants["C^2"] = (c*(dt/dx))**2
         self.x_prev = self.x.copy()
@@ -64,9 +59,32 @@ class Wave1D(GeneralWave):
 
         self._update_func = jit_wrapper
 
+class Leapfrog(GeneralWave):
+    """1D wave equation solver using leapfrog method"""
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, c: float = 1.0, save_every: int = 0, use_jit: bool = False):
+        super().__init__(x0, dt, dx, save_every)
+        self.constants["cdx"] = (c/dx)**2
+        self.a = self.constants['cdx'] * (self.x[:-2] - 2*self.x[1:-1] + self.x[2:])
+        self.v = np.zeros_like(self.x)[1:-1]
+        if use_jit:
+            self._setup_jit()
+
+    def _update_func(self):
+        self.v = self.v + 0.5 * self.dt * self.a
+        self.x[1:-1] = self.x[1:-1] + self.dt * self.v
+        self.a = self.constants['cdx'] * (self.x[:-2] - 2*self.x[1:-1] + self.x[2:])
+        self.v = self.v + 0.5 * self.dt * self.a
+    
+    def _setup_jit(self):
+        from .optimized import leapfrog_jit
+        def jit_wrapper():
+            leapfrog_jit(self.x, self.v, self.a, self.dt, self.constants['cdx'])
+            
+        self._update_func = jit_wrapper
+
 class Wave2D(GeneralWave):
     """2D wave equation solver using finite difference method"""
-    def __init__(self, x0: np.ndarray, dt: float, dx: float, D: float = 1.0, save_every: int = 1, use_jit: bool = False):
+    def __init__(self, x0: np.ndarray, dt: float, dx: float, D: float = 1.0, save_every: int = 0, use_jit: bool = False):
         super().__init__(x0, dt, dx, save_every)
         self.constants["d"] = (dt*D) / (dx**2)
         if self.constants["d"] >= 0.25:

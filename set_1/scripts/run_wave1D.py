@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 
 from ..utils.config import *  # noqa: F403
-from ..utils.wave import Wave1D
+from ..utils.wave import Wave1D, Leapfrog
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +46,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--animate",
         help="Whether to make an animated plot or just heatmap",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--leapfrog",
+        help="Whether to use leapfrog method instead of finite difference",
         action="store_true"
     )
     return parser.parse_args()
@@ -104,7 +109,10 @@ def main():
     else:
         x0 = np.where((1/5 < x0) & (x0 < 2/5), np.sin(5*np.pi*x0), 0)
 
-    wave = Wave1D(x0, 0.001, 0.001, c=1.0, save_every=args.save_every)
+    if args.leapfrog:
+        wave = Leapfrog(x0, 0.001, 0.001, c=1.0, save_every=args.save_every)
+    else:
+        wave = Wave1D(x0, 0.001, 0.001, c=1.0, save_every=args.save_every)
 
     if args.animate:
         wave.run(args.steps)
