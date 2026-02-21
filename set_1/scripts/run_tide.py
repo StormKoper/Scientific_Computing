@@ -52,19 +52,19 @@ def plot_itermethods_vs_analytical() -> None:
 
     # solving the time-independent diffusion equation, is just a line
     y_vals = np.linspace(0, 1, N, dtype=float)
-    plt.plot(y_vals, y_vals, linestyle="-", linewidth=1, c='black', label="Analytical Sol")
+    plt.plot(y_vals, y_vals, linestyle="-", linewidth=3, c='black', label="Analytical Sol")
 
     J_slice = J.x_arr[::-1, 1, -1]
     plt.plot(y_vals, J_slice, marker='o', linestyle='None', c='firebrick', label="Jacobi",
-             markevery=(0, 6), markersize=6)
+             markevery=(0, 6), markersize=12)
 
     G_slice = G.x_arr[::-1, 1, -1]
     plt.plot(y_vals, G_slice, marker='x', linestyle='None', c='darkcyan', label="Gauss-Seidel",
-             markevery=(2, 6), markersize=6)
+             markevery=(2, 6), markersize=12)
 
     S_slice = S.x_arr[::-1, 1, -1]
     plt.plot(y_vals, S_slice, marker='^', linestyle='None', c='forestgreen', label="SOR ($\\omega = 1.8$)",
-             markevery=(4, 6), markersize=6)
+             markevery=(4, 6), markersize=12)
     
     plt.xlabel("y-value")
     plt.ylabel("Concentration (C)")
@@ -108,15 +108,15 @@ def plot_convergence_measures():
     # init figure
     _ = plt.figure(figsize=(10,8), constrained_layout=True)
 
-    plt.plot(p_s, iter_counts['Jacobi'], c='orangered', label='Jacobi')
-    plt.plot(p_s, iter_counts['Gauss_Seidel'], c='purple', label='Gauss_Seidel')
+    plt.plot(p_s, iter_counts['Jacobi'], linewidth=3, c='gold', label='Jacobi')
+    plt.plot(p_s, iter_counts['Gauss_Seidel'], linewidth=3, c='orangered', label='Gauss_Seidel')
 
     mpl_cmap = mpl.colormaps['winter']
     colors = mpl_cmap(np.linspace(0, 1, len(omegas)))
     custom_cmap = ListedColormap(colors)
 
     for i, (omega, iters) in enumerate(iter_counts['SOR'].items()):
-        plt.plot(p_s, iters, c=custom_cmap(i), linestyle="--", label=f'SOR $\\omega = {omega}$')
+        plt.plot(p_s, iters, c=custom_cmap(i), linewidth=3, linestyle=":", label=f'SOR $\\omega = {omega}$')
 
     plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
 
@@ -154,7 +154,7 @@ def find_optimal_omega():
     plt.legend([f"N={N}" for N in N_values], fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
-    plt.savefig("set_1/results/omega_sweep.png", dpi=300)
+    plt.savefig(SET1_ROOT / "results/omega_sweep.png", dpi=300)
     plt.show()
     
     # golden section search for optimal omega
@@ -213,7 +213,7 @@ def find_optimal_omega():
     plt.legend(fancybox=True, shadow=True, loc='upper left')
     plt.yscale("log")
     plt.tight_layout()
-    plt.savefig("set_1/results/golden_section.png", dpi=300)
+    plt.savefig(SET1_ROOT / "results/golden_section.png", dpi=300)
     plt.show()
 
     return optimal_omegas
