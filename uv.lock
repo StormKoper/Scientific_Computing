@@ -467,6 +467,13 @@ dependencies = [
     { name = "numpy" },
     { name = "pytest" },
     { name = "scipy" },
+    { name = "tqdm" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "git-fame" },
+    { name = "pytest" },
 ]
 
 [package.metadata]
@@ -477,6 +484,13 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "scipy", specifier = ">=1.17.0" },
+    { name = "tqdm", specifier = ">=4.67.2" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "git-fame", specifier = ">=3.1.1" },
+    { name = "pytest", specifier = ">=9.0.2" },
 ]
 
 [[package]]
