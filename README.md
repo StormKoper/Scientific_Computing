@@ -12,7 +12,7 @@
     │   ├── benchmarks.py      # Benchmarking tool for base vs JIT performance
     │   ├── run_tide.py        # Scripts for Time-Independent Diffusion (Questions H-L)
     │   ├── run_wave1D.py      # Scripts for 1D Wave Equation (Questions B-C)
-    │   └── run_wave2D.py      # Scripts for 2D Wave Equation (Questions E-G)
+    │   └── run_wave2D.py      # Scripts for Time dependent 2D Diffusion Equation (Questions E-G)
     ├── tests/               # Pytest unit tests
     │   ├── test_misc.py       # Tests for helper functions
     │   ├── test_tide.py       # Tests for TIDE solvers (Jacobi, Gauss-Seidel, SOR)
