@@ -122,12 +122,12 @@ def plot_normal_vs_leapfrog(steps: int, case: str) -> None:
     An = get_fourier_coefficients(n_terms=100)
     analytical = np.array([analytical_wave1D(x, t, case, c=c, An=An) for t in t_arr]).T
     
-    plt.figure(figsize=(7, 6))
+    plt.figure(figsize=(5, 4))
     plt.plot(t_arr, np.max(np.abs(analytical - normal.x_arr), axis=0),
              c="firebrick", label="Normal Method")
     plt.plot(t_arr, np.max(np.abs(analytical - leapfrog.x_arr), axis=0),
              c="darkcyan", label="Leapfrog Method")
-    plt.legend(fancybox=True, shadow=True)
+    plt.legend(fancybox=True, shadow=True, loc="upper right")
     plt.title(f"Initial condition {case}")
     plt.xlabel("Time (t)")
     plt.ylabel("Max Absolute Error")

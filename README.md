@@ -54,6 +54,11 @@ Below are the CLI commands to obtain the figures used in the report for set 1. N
   uv run -m set_1.scripts.run_wave1D -b_type ii -steps 1000 -save_every 10 --animate
   uv run -m set_1.scripts.run_wave1D -b_type iii -steps 1000 -save_every 10 --animate
   ```
+* **Optional question** (Leapfrog):
+  ```bash
+  uv run -m set_1.scripts.run_wave1D -b_type i -steps 5000 --compare
+  uv run -m set_1.scripts.run_wave1D -b_type iii -steps 5000 --compare
+  ```
 ### 2D Diffusion
 * **Question E** (2D Diffusion vs Analytical Solution)
   ```bash
