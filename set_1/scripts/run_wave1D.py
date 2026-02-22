@@ -98,8 +98,7 @@ def plot_normal_vs_leapfrog(steps: int, case: str) -> None:
     dt = 0.001
     c = 1.0
     n_steps = steps
-
-
+    
     x = np.linspace(0, 1, int(1 / dx) + 1)
     if case == 'i':
         x0 = np.sin(2*np.pi*x)
@@ -122,24 +121,17 @@ def plot_normal_vs_leapfrog(steps: int, case: str) -> None:
     t_arr = np.arange(n_steps) * dt
     An = get_fourier_coefficients(n_terms=100)
     analytical = np.array([analytical_wave1D(x, t, case, c=c, An=An) for t in t_arr]).T
-
-    _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,6), constrained_layout=True)
-
-    ax1.plot(t_arr, np.max(np.abs(analytical - normal.x_arr), axis=0),
+    
+    plt.figure(figsize=(7, 6))
+    plt.plot(t_arr, np.max(np.abs(analytical - normal.x_arr), axis=0),
              c="firebrick", label="Normal Method")
-    ax1.plot(t_arr, np.max(np.abs(analytical - leapfrog.x_arr), axis=0),
+    plt.plot(t_arr, np.max(np.abs(analytical - leapfrog.x_arr), axis=0),
              c="darkcyan", label="Leapfrog Method")
-    ax1.legend(fancybox=True, shadow=True)
-    ax1.set_xlabel("Time (t)")
-    ax1.set_ylabel("Max Absolute Error")
-
-    ax2.plot(t_arr, np.max(analytical, axis=0), c="black", linestyle=":", label="Analytical Truth")
-    ax2.plot(t_arr, np.max(normal.x_arr, axis=0), c="firebrick", label="Normal Method")
-    ax2.plot(t_arr, np.max(leapfrog.x_arr, axis=0), c="darkcyan", label="Leapfrog Method")
-    ax2.legend(fancybox=True, shadow=True)
-    ax2.set_xlabel("Time (t)")
-    ax2.set_ylabel("Max Amplitude")
-
+    plt.legend(fancybox=True, shadow=True)
+    plt.title(f"Initial condition {case}")
+    plt.xlabel("Time (t)")
+    plt.ylabel("Max Absolute Error")
+    plt.tight_layout()
     plt.show()
 
 def main():
