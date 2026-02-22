@@ -23,7 +23,6 @@ class GeneralWave():
         for n in range(n_iters):
             self._update_func()
             if self.save_every and (n % self.save_every == 0):
-                new = self.x.astype(np.float16).copy()[..., None]
                 self._frames.append(self.x.astype(np.float16).copy())
         self.x_arr = np.stack(self._frames, axis=-1)
 

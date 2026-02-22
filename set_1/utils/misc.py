@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from math import erfc
+from scipy.integrate import quad
 from pathlib import Path
 
 import numpy as np
@@ -28,21 +29,45 @@ def analytical_concentration(y: float, t: float, D: float, sum_iters: int = 1000
     
     return total
 
-# NOT FINALIZED, IDK YET HOW TO ALTER FOR OUR DIRICHELET BOUNDARIES
-def analytical_1D_wave(x: np.ndarray, t: float, f: Callable, c: float = 1.0) -> np.ndarray:
-    """NOT FINALIZED, IDK YET HOW TO ALTER FOR OUR DIRICHELET BOUNDARIES
+def get_fourier_coefficients(n_terms=100):
+    """Calculate the Fourier coefficients for the initial condition in case 'iii' (sin(5*pi*x) if 1/5 < x < 2/5, else 0). Returns an array of the first n_terms coefficients."""
+    An = np.zeros(n_terms)
+    for n in range(1, n_terms + 1):
+        # explicitly handle n=5 to avoid numerical integration oddities
+        if n == 5:
+            An[n-1] = 0.2  # analytical result for n=5
+        else:
+            integrand = lambda x_val: np.sin(5 * np.pi * x_val) * np.sin(n * np.pi * x_val)
+            integral_val, _ = quad(integrand, 1/5, 2/5)
+            An[n-1] = 2 * integral_val
+    return An
+
+def analytical_wave1D(x: np.ndarray, t: float, case: str, c: float = 1.0, An: np.ndarray = None) -> np.ndarray:
+    """Calculate the analytical amplitude of a 1D wave based on the initial condition case. Assumes x is in [0, 1] and t >= 0. For case 'i' and 'ii', the analytical solution is straightforward. For case 'iii', the solution is given by a Fourier series expansion, and the first n_terms coefficients must be provided in An."""
+    # initial condition: sin(2*pi*x)
+    if case == "i":
+        return np.sin(2*np.pi*x) * np.cos(2*np.pi*c*t)
     
-    Calculate the analytical amplitude of a 1D wave.
-    Function is based on solution by d'Alembert ommiting initial velocity component.
+    # initial condition: sin(5*pi*x)
+    if case == "ii":
+        return np.sin(5*np.pi*x) * np.cos(5*np.pi*c*t)
     
-    Args:
-        - x (np.ndarray): Points in 1D space to calculate the amplitude for.
-        - t (float): Time at which to calculate amplitude.
-        - f (Callable): Function that was used to create initial condition X0.
-        - c (float): Propagation velocity of wave.
-    
-    """
-    return 0.5 * (f(x - c*t) + f(x + c*t))
+    # initial condition: sin(5*pi*x) if 1/5 < x < 2/5, else 0
+    if case == "iii":
+        if An is None:
+            raise ValueError("An must be provided for case 'iii'")
+        # natural number array for the Fourier series terms
+        n = np.arange(1, len(An) + 1)
+        # 2D array for the spatial term using outer product to efficiently compute sin(pi*n*x) for each n and x
+        sin_term = np.sin(np.pi * np.outer(x, n))
+        # 1D array for the temporal term for each n
+        cos_term = np.cos(np.pi*n*c*t)
+        # multiply the coefficients, spatial terms, and temporal terms
+        # broadcasting handles the dimensions, then we sum along the 'n' axis (axis=1)
+        psi = np.sum(An * sin_term * cos_term, axis=1)
+        return psi
+    else:
+        raise ValueError(f"Invalid case: {case}. Must be one of 'i', 'ii', or 'iii'.")
 
 def load_target_image(image_path: Path, grid_size: int) -> np.ndarray:
     """Load an image, to utilize as a mask for objects

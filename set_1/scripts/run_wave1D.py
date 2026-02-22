@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 
 from ..utils.config import *  # noqa: F403
-from ..utils.misc import analytical_1D_wave
+from ..utils.misc import get_fourier_coefficients, analytical_wave1D
 from ..utils.wave import Leapfrog, Wave1D
 
 
@@ -54,6 +54,11 @@ def parse_args() -> argparse.Namespace:
         help="Whether to use leapfrog method instead of finite difference",
         action="store_true"
     )
+    parser.add_argument(
+        "--compare",
+        help="Whether to plot the comparison between normal and leapfrog method",
+        action="store_true"
+    )
     return parser.parse_args()
 
 def animate_wave(x_arr: np.ndarray,
@@ -88,28 +93,39 @@ def animate_wave(x_arr: np.ndarray,
     anim = FuncAnimation(fig, update, frames=x_arr.shape[-1], interval=interval, blit=True)
     plt.show()
 
-def plot_normal_vs_leapfrog():
+def plot_normal_vs_leapfrog(steps: int, case: str) -> None:
     dx = 0.001
     dt = 0.001
     c = 1.0
-    n_steps = 2000
+    n_steps = steps
+
 
     x = np.linspace(0, 1, int(1 / dx) + 1)
-    f = lambda x: np.sin(2*np.pi*x)  # noqa: E731
-    x0 = f(x)
+    if case == 'i':
+        x0 = np.sin(2*np.pi*x)
+    elif case == 'ii':
+        x0 = np.sin(5*np.pi*x)
+    elif case == 'iii':
+        x0 = np.where((1/5 < x) & (x < 2/5), np.sin(5*np.pi*x), 0)
+    else:
+        raise ValueError("Invalid case: case should be one of ['i', 'ii', 'iii']")
 
-    normal = Wave1D(x0.copy(), dt, dx, c=1.0, save_every=1, use_jit=True)
+    print("Running finite difference scheme...")
+    normal = Wave1D(x0.copy(), dt, dx, c=c, save_every=1)
     normal.run(n_steps - 1)
 
-    leapfrog = Leapfrog(x0.copy(), dt, dx, c=1.0, save_every=1, use_jit=True)
+    print("Running leapfrog method...")
+    leapfrog = Leapfrog(x0.copy(), dt, dx, c=c, save_every=1)
     leapfrog.run(n_steps - 1)
 
+    print("Calculating analytical solution...")
     t_arr = np.arange(n_steps) * dt
-    analytical = np.array([analytical_1D_wave(x, t, f, c=c) for t in t_arr]).T
+    An = get_fourier_coefficients(n_terms=100)
+    analytical = np.array([analytical_wave1D(x, t, case, c=c, An=An) for t in t_arr]).T
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,6), constrained_layout=True)
+    _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12,6), constrained_layout=True)
 
-    ax1.plot(t_arr, np.max(np.abs(analytical - normal.x_arr), axis=0), 
+    ax1.plot(t_arr, np.max(np.abs(analytical - normal.x_arr), axis=0),
              c="firebrick", label="Normal Method")
     ax1.plot(t_arr, np.max(np.abs(analytical - leapfrog.x_arr), axis=0),
              c="darkcyan", label="Leapfrog Method")
@@ -133,8 +149,12 @@ def main():
         - b_type (str): denotes the type of initial conditions for the wave.
         - steps (int): the number of steps to take (delta t = 0.001).
         - save_every (int): how often should the wave be saved for plotting.
-        - '-animate' (OPTIONAL): flag to denot if animation should be made instead of heatmap."""
+        - animate (OPTIONAL): flag to denote if animation should be made instead of heatmap."""
     args = parse_args()
+
+    if args.compare:
+        plot_normal_vs_leapfrog(args.steps, args.b_type)
+        return
 
     if args.b_type not in ['i', 'ii', 'iii']:
         raise ValueError("Argument b_type should be one of ['i', 'ii', 'iii']")
