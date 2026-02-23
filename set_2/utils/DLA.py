@@ -5,24 +5,24 @@ from numba import njit, prange
 
 class DLA():
     """Diffusion limited aggregation class"""
-    def __init__(self, x0: np.ndarray, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, use_jit: bool = False, seed: int|None = None):
-        self.x = x0
+    def __init__(self, N: int = 100, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, use_jit: bool = False, seed: int|None = None):
+        self.x = np.linspace(1, 0, N)[None, :].repeat(N, axis=0).T
         self.eta = eta
         self.omega = omega
         self.gen = np.random.default_rng(seed)
-
-        self._frames = [np.zeros_like(x0, dtype=bool).copy()]
-        self.obj_arr = None
         
         self.save_error = save_error
         if save_error: self.error_history = []
         
         self.iter_count = 0
 
-        # initialize an obj_mask with no objects
-        self.obj_mask = np.ones_like(x0, dtype=bool)
+        # initialize an obj_mask with no objects (True means empty, False means occupied)
+        self.obj_mask = np.ones_like(self.x, dtype=bool)
         # seed the initial object in the middle of the bottom row
-        self.obj_mask[-1, x0.shape[1]//2] = False
+        self.obj_mask[-1, N//2] = False
+
+        self._frames = [np.where(self.obj_mask, self.x, -1)]
+        self.x_arr = None
 
         if use_jit:
             self._setup_jit()
@@ -152,8 +152,9 @@ class DLA():
         # choose a candidate site based on the probabilities
         flat_index = self.gen.choice(np.flatnonzero(candidates), p=probabilities)
         candidate_index = np.unravel_index(flat_index, self.obj_mask.shape)
-        # update the obj_mask to include the new object
+        # update the obj_mask and x to include the new object
         self.obj_mask[candidate_index] = False
+        self.x[candidate_index] = 0.0
     
     def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5):
         """Run the DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
@@ -167,6 +168,7 @@ class DLA():
                 while error > epsilon:
                     error = self._step()
                 self._grow()
+                self._frames.append(np.where(self.obj_mask, self.x, -1))
         elif grow_until is not None:
             height_threshold = grow_until * self.x.shape[0]
             while not np.any(~self.obj_mask[-int(height_threshold):, :]):
@@ -174,5 +176,6 @@ class DLA():
                 while error > epsilon:
                     error = self._step()
                 self._grow()
+                self._frames.append(np.where(self.obj_mask, self.x, -1))
         
-        self.obj_arr = np.stack(self._frames, axis=-1)
+        self.x_arr = np.stack(self._frames, axis=-1)
