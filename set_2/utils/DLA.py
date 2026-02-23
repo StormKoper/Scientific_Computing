@@ -5,10 +5,11 @@ from numba import njit, prange
 
 class DLA():
     """Diffusion limited aggregation class"""
-    def __init__(self, x0: np.ndarray, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, use_jit: bool = False):
+    def __init__(self, x0: np.ndarray, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, use_jit: bool = False, seed: int|None = None):
         self.x = x0
         self.eta = eta
         self.omega = omega
+        self.gen = np.random.default_rng(seed)
 
         self._frames = [np.zeros_like(x0, dtype=bool).copy()]
         self.obj_arr = None
@@ -149,7 +150,7 @@ class DLA():
             return
         probabilities = conc_eta / np.sum(conc_eta)
         # choose a candidate site based on the probabilities
-        flat_index = np.random.choice(np.flatnonzero(candidates), p=probabilities)
+        flat_index = self.gen.choice(np.flatnonzero(candidates), p=probabilities)
         candidate_index = np.unravel_index(flat_index, self.obj_mask.shape)
         # update the obj_mask to include the new object
         self.obj_mask[candidate_index] = False
