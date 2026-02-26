@@ -71,11 +71,12 @@ class DLA():
         for i in prange(1, rows - 1):
             # boundary
             if i % 2 == 0:
-                neighbor_sum = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
-                next = (1 - omega) * x[i, 0] + omega * neighbor_sum
-                diff = abs(next - x[i, 0])
-                x[i, 0] = next
-                max_diff = max(max_diff, diff)
+                if obj_mask[i, 0]:
+                    neighbor_sum = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
+                    next = (1 - omega) * x[i, 0] + omega * neighbor_sum
+                    diff = abs(next - x[i, 0])
+                    x[i, 0] = next
+                    max_diff = max(max_diff, diff)
             
             # interior
             start = 2 if (i % 2 == 0) else 1
@@ -94,11 +95,12 @@ class DLA():
         for i in prange(1, rows - 1):
             # boundary
             if i % 2 != 0:
-                neighbor_sum = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
-                next = (1 - omega) * x[i, 0] + omega * neighbor_sum
-                diff = abs(next - x[i, 0])
-                x[i, 0] = next
-                max_diff = max(max_diff, diff)
+                if obj_mask[i, 0]:
+                    neighbor_sum = 0.25 * (x[i-1, 0] + x[i+1, 0] + x[i, 1] + x[i, -2])
+                    next = (1 - omega) * x[i, 0] + omega * neighbor_sum
+                    diff = abs(next - x[i, 0])
+                    x[i, 0] = next
+                    max_diff = max(max_diff, diff)
             
             # interior
             start = 1 if (i % 2 == 0) else 2
@@ -128,8 +130,9 @@ class DLA():
     
     def _grow(self):
         """Choose a candidate site for growth and update the obj_mask"""
+        obj_mask = self.obj_mask[:, :-1] # exclude final column
         # check cells for adjacency to an object
-        padded = np.pad(self.obj_mask, pad_width=1, mode='wrap')
+        padded = np.pad(obj_mask, pad_width=1, mode='wrap')
         has_obj_neighbor = (
             ~padded[:-2, 1:-1] |  # up
             ~padded[2:, 1:-1]  |  # fown
@@ -138,23 +141,27 @@ class DLA():
         )
 
         # filter out objects
-        candidates = self.obj_mask & has_obj_neighbor
+        candidates = obj_mask & has_obj_neighbor
         candidates[0, :] = False # prevent growth on the top boundary
         if not np.any(candidates):
             warn("No growth candidates found. Not growing any new sites.")
             return
         # compute the growth probability for each site
-        conc_eta = self.x[candidates]**self.eta
+        conc_eta = self.x[:, :-1][candidates]**self.eta
         if np.sum(conc_eta) == 0:
             warn("All candidate sites have zero concentration. Not growing any new sites.")
             return
         probabilities = conc_eta / np.sum(conc_eta)
         # choose a candidate site based on the probabilities
         flat_index = self.gen.choice(np.flatnonzero(candidates), p=probabilities)
-        candidate_index = np.unravel_index(flat_index, self.obj_mask.shape)
+        candidate_index = np.unravel_index(flat_index, obj_mask.shape)
         # update the obj_mask and x to include the new object
         self.obj_mask[candidate_index] = False
         self.x[candidate_index] = 0.0
+        # enforce periodicity condition for the rightmost column
+        if candidate_index[1] == 0:
+            self.obj_mask[candidate_index[0], -1] = False
+            self.x[candidate_index[0], -1] = 0.0
     
     def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5):
         """Run the DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
@@ -170,8 +177,8 @@ class DLA():
                 self._grow()
                 self._frames.append(np.where(self.obj_mask, self.x, -1))
         elif grow_until is not None:
-            height_threshold = grow_until * self.x.shape[0]
-            while not np.any(~self.obj_mask[-int(height_threshold):, :]):
+            height_threshold = self.x.shape[0] - int(grow_until * self.x.shape[0])
+            while np.all(self.obj_mask[height_threshold, :]):
                 error = float('inf')
                 while error > epsilon:
                     error = self._step()
