@@ -103,7 +103,7 @@ Below are the CLI commands to obtain the figures used in the report for set 1. N
   uv run -m set_1.scripts.benchmarks -method SOR -iterations 1000 -N 500 -repeats 5 --warmup_jit
   ```
 
-## Set 1
+## Set 2
 
 ### Gray-Scott Model
 * **Info on CLI arguments**:
