@@ -19,3 +19,8 @@ dev = [
     "git-fame>=3.1.1",
     "pytest>=9.0.2",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = [
+    "."
+]

@@ -1,5 +1,6 @@
 import numpy as np
-from utils.DLA import DLA
+
+from set_2.utils.DLA import DLA
 
 N = 20
 n = 5

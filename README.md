@@ -102,3 +102,31 @@ Below are the CLI commands to obtain the figures used in the report for set 1. N
   ```bash
   uv run -m set_1.scripts.benchmarks -method SOR -iterations 1000 -N 500 -repeats 5 --warmup_jit
   ```
+
+## Set 1
+
+### Gray-Scott Model
+* **Info on CLI arguments**:
+  ```bash
+  uv run -m set_2.scripts.run_rd --help
+  ```
+* **Some Interesting Plots**
+  ```bash
+  uv run -m set_2.scripts.run_rd
+  ```
+  ```bash
+  uv run -m set_2.scripts.run_rd -p statspanel
+  ```
+  ```bash
+  uv run -m set_2.scripts.run_rd -f 0.098 -k 0.057 -N 100 --noise 0.7 -p static
+  ```
+  ```bash
+  uv run -m set_2.scripts.run_rd -f 0.029 -k 0.057 -N 100
+  uv run -m set_2.scripts.run_rd -f 0.029 -k 0.057 -N 100 -p statspanel
+  ```
+
+### Misc
+* Run tests with:
+  ```bash
+  uv run pytest set_2
+  ```
