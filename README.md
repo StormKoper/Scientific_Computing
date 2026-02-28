@@ -39,7 +39,7 @@ source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
 pip install .
 ```
 
-## Set 1
+## Set 2
 Below are the CLI commands to obtain the figures used in the report for set 1. Note that if you are not using `uv` you can replace `uv run` with `python` after activating your virtual environment.
 ### 1D Wave Equation
 * **Question B** (Time development of 1D wave):
