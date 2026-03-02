@@ -9,9 +9,12 @@ def save_frames(N: int = 100, n_growth: int = 100, interval: int = 10):
     """Save the frames of the DLA growth"""
     dla = DLA(N=N, eta=0.8, use_jit=True, seed=42)
 
+    cmap = plt.get_cmap('viridis')
+    cmap.set_bad(color='white')  # set color for occupied sites
+
     for i in range(0, n_growth+1, interval):
         dla.run(n_growth=interval)
-        plt.imshow(dla.x_arr[..., i], cmap='viridis', vmin=-1, vmax=1)
+        plt.imshow(dla.x_arr[..., i], cmap=cmap, vmin=0, vmax=1)
         plt.title(f"Concentration Field at Frame {i}")
         plt.xlabel("Space (x)")
         plt.ylabel("Space (y)")
@@ -23,8 +26,11 @@ def animate_growth():
     dla = DLA(N=100, eta=0.5, omega=1.0, use_jit=True, seed=42)
     dla.run(n_growth=250)
 
+    cmap = plt.get_cmap('viridis')
+    cmap.set_bad(color='white')  # set color for occupied sites
+
     fig = plt.figure(constrained_layout=True)
-    artist = plt.imshow(dla.x_arr[..., 0], vmin=-1, vmax=1)
+    artist = plt.imshow(dla.x_arr[..., 0], cmap=cmap, vmin=0, vmax=1)
     ax = plt.gca()
     ax.set_aspect('equal')
     title = ax.set_title("Growth Animation - Size 0")
