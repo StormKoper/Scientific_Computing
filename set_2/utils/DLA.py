@@ -3,6 +3,7 @@ from warnings import warn
 import numpy as np
 from numba import njit, prange
 
+
 class DLA():
     """Diffusion limited aggregation class"""
     def __init__(self, N: int = 100, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, use_jit: bool = False, seed: int|None = None):
@@ -42,7 +43,7 @@ class DLA():
                        + self.x[2:, :] + self.x[:-2, :])
         
         x_next = self.omega * neighbor_sum + (1 - self.omega) * self.x[1:-1, :]
-        error = np.max(np.abs(x_next - self.x[1:-1, :]))
+        error = np.max(np.abs(x_next[self.obj_mask[1:-1, :]] - self.x[1:-1, :][self.obj_mask[1:-1, :]]))
         self.x[1:-1, :][mask & self.obj_mask[1:-1, :]] = x_next[mask & self.obj_mask[1:-1, :]]
 
         # enforce periodicity condition for the rightmost column
