@@ -22,7 +22,7 @@ class DLA():
         # seed the initial object in the middle of the bottom row
         self.obj_mask[-1, N//2] = False
 
-        self._frames = [np.where(self.obj_mask, self.x, -1)]
+        self._frames = [np.ma.masked_where(self.obj_mask == False, self.x)]
         self.x_arr = None
 
         if use_jit:
@@ -176,7 +176,7 @@ class DLA():
                 while error > epsilon:
                     error = self._step()
                 self._grow()
-                self._frames.append(np.where(self.obj_mask, self.x, -1))
+                self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
         elif grow_until is not None:
             height_threshold = self.x.shape[0] - int(grow_until * self.x.shape[0])
             while np.all(self.obj_mask[height_threshold, :]):
@@ -184,6 +184,6 @@ class DLA():
                 while error > epsilon:
                     error = self._step()
                 self._grow()
-                self._frames.append(np.where(self.obj_mask, self.x, -1))
+                self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
         
-        self.x_arr = np.stack(self._frames, axis=-1)
+        self.x_arr = np.ma.stack(self._frames, axis=-1)
