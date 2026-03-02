@@ -1,6 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from tqdm import tqdm
+from numba import set_num_threads
+from joblib import Parallel, delayed
+import itertools
 
 from ..utils.config import *  # noqa: F403
 from ..utils.DLA import DLA
@@ -47,29 +51,34 @@ def animate_growth():
     _ = FuncAnimation(fig, update, frames=dla.x_arr.shape[-1], interval=10, blit=True)
     plt.show()
 
-def compare_dla_rw(N: int = 100, n_growth: int = 100, params: int = 10, sims: int = 10):
-    """Compare the DLA growth with random walk growth"""
-    dlas = np.ndarray((N, N, params, sims), dtype=bool)
-    mcs = np.ndarray((N, N, params, sims), dtype=bool)
+def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10):
+    """Compare the DLA growth with random walk growth.
+    Arguments:
+        N: grid size
+        grow_until: the fraction of the grid to grow until
+        params: the number of different parameters to sweep for both DLA and random walk
+        sims: the number of simulations to run for each parameter setting"""
+    dlas = np.zeros((N, N, params))
+    mcs = np.zeros((N, N, params))
     seeds = np.random.SeedSequence(42).spawn(2*sims)
     dla_seeds = seeds[sims:]
     mc_seeds = seeds[:sims]
     # DLA growth
     for i, eta in enumerate(np.linspace(0, 1, params)):
-        for j, seed in enumerate(dla_seeds):
+        for seed in tqdm(dla_seeds, desc=f"Running DLA simulations for eta={eta:.2f}", leave=False):
             dla = DLA(N=N, eta=eta, use_jit=True, seed=seed)
-            dla.run(n_growth=n_growth)
-            dlas[..., i, j] = dla.obj_mask
+            dla.run(grow_until=grow_until)
+            dlas[..., i] += dla.obj_mask
+        dlas[..., i] /= sims # average over simulations
     
     # random walk growth
     for i, p_s in enumerate(np.linspace(0.2, 1, params)):
-        for j, seed in enumerate(mc_seeds):
+        for seed in tqdm(mc_seeds, desc=f"Running MC simulations for p_s={p_s:.2f}", leave=False):
             temp = np.random.default_rng(seed).choice([0,1], size=(N, N), p=[0.5, 0.5])
-            mcs[..., i, j] = temp
+            mcs[..., i] += temp
+        mcs[..., i] /= sims # average over simulations
 
-    avg_dla = np.mean(dlas, axis=-1)
-    avg_mc = np.mean(mcs, axis=-1)
-    msd_grid = np.mean((avg_dla[..., :, None] - avg_mc[..., None, :]) ** 2, axis=[0,1])
+    msd_grid = np.mean((dlas[..., :, None] - mcs[..., None, :]) ** 2, axis=[0,1])
     plt.figure(figsize=(8, 6), constrained_layout=True)
     plt.imshow(msd_grid, cmap='viridis')
     plt.colorbar(label="Mean Squared Difference")
@@ -80,5 +89,124 @@ def compare_dla_rw(N: int = 100, n_growth: int = 100, params: int = 10, sims: in
     plt.ylabel("DLA $\\eta$")
     plt.show()
 
+def _run_dla_for_omega(N: int, eta: float, omega: float, grow_until: float, seed: int) -> float:
+    """Helper function to run a single DLA simulation for a given omega and return the number of iterations to converge."""
+    dla = DLA(N=N, eta=eta, omega=omega, save_error=False, use_jit=True, seed=seed)
+    dla.run(grow_until=grow_until)
+    return dla.iter_count / (np.count_nonzero(dla.obj_mask) - 1)
+
+def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10):
+    """Find the optimal omega for SOR iteration of DLA at different eta.
+    Arguments:
+        N: grid size
+        grow_until: the fraction of the grid to grow until
+        params: the number of different eta values to sweep
+        sims: the number of simulations to run for each eta value"""
+    set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
+    etas = np.linspace(0, 1, params)
+    min_omega, max_omega = 1.0, 1.5 # safely below divergence TODO: add a check for divergence set max_omega to 1.99
+    n_sweep = 11
+    omegas = np.linspace(min_omega, max_omega, n_sweep)
+    seeds = np.random.SeedSequence(42).spawn(sims)
+
+    tasks = itertools.product(etas, omegas, seeds)
+    
+    print("Running initial parameter sweep in parallel...")
+    results = Parallel(n_jobs=-1)(
+        delayed(_run_dla_for_omega)(N, eta, omega, grow_until, seed) 
+        for eta, omega, seed in tqdm(tasks, total=params*n_sweep*sims, desc="Parameter Sweep")
+    )
+
+    print("Processing results and plotting...")
+    results_3d = np.array(results).reshape(params, n_sweep, sims)
+    iterations = np.mean(results_3d, axis=2) # average over simulations
+
+    plt.figure(figsize=(8,6), constrained_layout=True)
+    plt.plot(omegas, iterations.T, marker='o')
+    plt.xlabel("$\\omega$")
+    plt.ylabel("Number of Iterations to Converge")
+    plt.title(f"Parameter Sweep for Optimal $\\omega$ ($N={N}$)")
+    plt.legend([f"$\\eta={eta}$" for eta in etas], fancybox=True, shadow=True, loc='upper left')
+    plt.yscale("log")
+    plt.show()
+    
+    # golden section search for optimal omega
+    n_golden_section = 10
+    omegas_gs = [[] for _ in range(params)]
+    iterations_gs = [[] for _ in range(params)]
+    invphi = (np.sqrt(5) - 1) / 2 # 1/phi
+
+    # find the two omegas that are closest to the optimal omega found in the sweep
+    optimal_omega_ids = np.argmin(iterations, axis=1)
+    left_bound_ids = np.maximum(optimal_omega_ids - 1, 0)
+    right_bound_ids = np.minimum(optimal_omega_ids + 1, len(omegas) - 1)
+    a = omegas[left_bound_ids]
+    b = omegas[right_bound_ids]
+    
+    for i, eta in enumerate(etas):
+        omegas_gs[i].extend([a[i], b[i]])
+        iterations_gs[i].extend([iterations[i, left_bound_ids[i]], iterations[i, right_bound_ids[i]]])
+    
+    # iterate until we have done n_golden_section iterations
+    for _ in tqdm(range(n_golden_section), desc="Golden Section Iterations"):
+        c = b - (b - a) * invphi
+        d = a + (b - a) * invphi
+        # create a list of tasks for the new omegas to test in parallel
+        omegas_to_test = np.column_stack((c, d))
+        tasks = [
+            (etas[i], omegas_to_test[i, j], seed)
+            for i in range(len(etas))
+            for j in range(2)  # j=0 is c, j=1 is d
+            for seed in seeds
+        ]
+        # run the new tasks in parallel and collect results
+        results = Parallel(n_jobs=-1)(
+            delayed(_run_dla_for_omega)(N, eta, omega, grow_until, seed) 
+            for eta, omega, seed in tasks
+        )
+        # reshape results to be (params, [c, d], sims) and average over simulations
+        results_3d = np.array(results).reshape(params, 2, sims)
+        iterations = np.mean(results_3d, axis=2)
+        # update the bounds a and b based on the new iterations
+        for i in range(params):
+            iters_c = iterations[i, 0]
+            iters_d = iterations[i, 1]
+            omegas_gs[i].extend([c[i], d[i]])
+            iterations_gs[i].extend([iters_c, iters_d])
+            if iters_c < iters_d:
+                b[i] = d[i]
+            else:
+                a[i] = c[i]
+
+    # the optimal omega is the midpoint of the final interval [a, b]
+    optimal_omegas = (a + b) / 2
+    # the best omega is the one with the least iterations in the golden section search
+    best_omegas = np.zeros(params)
+    best_iterations = np.zeros(params)
+    for i in range(params):
+        best_omegas[i] = omegas_gs[i][np.argmin(iterations_gs[i])]
+        best_iterations[i] = np.min(iterations_gs[i])
+
+    plt.figure(figsize=(8, 6), constrained_layout=True)
+    for omega, iters, eta in zip(omegas_gs, iterations_gs, etas):
+        plt.plot(omega, iters, marker='o', markersize=3, alpha=0.5, linestyle='--', label=f"$\\eta={eta}$")
+    plt.plot(best_omegas, best_iterations, marker='o', c='black', label="Optimal $\\omega$")
+    plt.xlabel("$\\omega$")
+    plt.ylabel("Number of Iterations to Converge")
+    plt.title(f"Golden Section Search for Optimal $\\omega$ ($N={N}$)")
+    plt.legend(fancybox=True, shadow=True, loc='upper left')
+    plt.yscale("log")
+    plt.show()
+
+    # print a little table in terminal of best omega's and corresponding iterations
+    print("\r\033[K" + "-"*59)
+    print(f"|{'Etas':^15}|{'Best Omegas':^20}|{'Average Iterations':^20}|")
+    print("-"*59)
+    for eta, omega, iters in zip(etas, best_omegas, best_iterations):
+        print(f"|{eta:^15.3f}|{omega:^20.5f}|{iters:^20.3f}|")
+    print("-"*59)
+
+    return optimal_omegas
+
 if __name__ == "__main__":
-    animate_growth()
+    find_optimal_omega(N=50, grow_until=0.8, params=5, sims=5)
