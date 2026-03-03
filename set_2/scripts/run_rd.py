@@ -1,5 +1,7 @@
 import argparse
+import itertools
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
@@ -34,15 +36,19 @@ def parse_args() -> argparse.Namespace:
 
     sim = parser.add_argument_group("Simulation Settings")
     sim.add_argument('-N', help="Side length of the square grid", 
-                     type=int, default=50, metavar="")
+                     type=int, default=100, metavar="")
     sim.add_argument('-i', '--iterations', help="Number of time steps to simulate", 
                      type=int, default=5000, metavar="")
-    sim.add_argument('--noise', help="Amplitude of random noise added to initial state", 
+    sim.add_argument('-A', help="Amplitude of random noise added to initial state", 
                      type=float, default=0.0, metavar="")
+    sim.add_argument('--u_init', help="The initial value of u to seed all cells with",
+                     type=float, default=0.5, metavar="")
+    sim.add_argument('--v_init', help="The initial value of v to seed a 10% center square with",
+                     type=float, default=0.25, metavar="")
     
     vis = parser.add_argument_group("Visualization Settings")
-    vis.add_argument('-p', '--plot', help="How to visualize the results (choices: animate, static, statspanel)", 
-                     type=str, default='animate', choices=['animate', 'static', 'statspanel'], 
+    vis.add_argument('-p', '--plot', help="How to visualize the results (choices: animate, static, evolution, statspanel)", 
+                     type=str, default='animate', choices=['animate', 'static', 'evolution', 'statspanel'], 
                      metavar="")
     
     return parser.parse_args()
@@ -59,6 +65,7 @@ def plot_final_conc(GS: GrayScott) -> None:
         - GS (GrayScott): The GrayScott reaction diffusion object.
     
     """
+    args = parse_args()
     N = GS.grid.shape[0]
 
     rgb = np.zeros((N, N, 3))
@@ -69,8 +76,21 @@ def plot_final_conc(GS: GrayScott) -> None:
 
     _ = plt.figure(figsize=(8, 8), constrained_layout=True)
 
+    legend_elements = [
+        mpatches.Patch(color='red', label='Only $u$'),
+        mpatches.Patch(color='cyan', label='Only $v$'),
+        mpatches.Patch(color='white', label='Both ($u$ & $v$)'),
+        mpatches.Patch(color='black', label='None')
+    ]
+    plt.legend(handles=legend_elements, loc='lower left',
+               shadow=True, fancybox=True, facecolor='wheat',
+               edgecolor='black', framealpha=0.5)
+
     plt.imshow(rgb)
-    plt.title(f"Gray-Scott Concentration Field (t={GS.iter_count* GS.dt:.2f})")
+    plt.title(f"Gray-Scott Concentration Field at t={GS.iter_count* GS.dt:.2f}\n"
+              f"($D_u = {args.Du}$, $D_v = {args.Dv}$, $f = {args.f}$, $k = {args.k}$, "
+              f"$A_{{\\text{{noise}}}}={args.A}$, $u_{{\\text{{init}}}} = {args.u_init}$, "
+              f"$v_{{\\text{{init}}}} = {args.v_init}$)")
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
     plt.show()
@@ -90,6 +110,7 @@ def animate_conc(GS: GrayScott) -> None:
     if GS.grid_hist is None:
         raise ValueError("No simulation history, please call GS.run()")
     
+    args = parse_args()
     N = GS.grid.shape[0]
     
     rgb = np.zeros((N, N, 3))
@@ -103,11 +124,21 @@ def animate_conc(GS: GrayScott) -> None:
     artist = plt.imshow(rgb)
     ax = plt.gca()
     ax.set_aspect('equal')
-    textbox = ax.text(0.05, 0.05, "t: 0.00",
+    textbox = ax.text(0.95, 0.95, "t: 0.00",
         transform=ax.transAxes,
-        verticalalignment="bottom",
+        verticalalignment="top",
+        horizontalalignment="right",
         bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
     )
+    legend_elements = [
+        mpatches.Patch(color='red', label='Only $u$'),
+        mpatches.Patch(color='cyan', label='Only $v$'),
+        mpatches.Patch(color='white', label='Both ($u$ & $v$)'),
+        mpatches.Patch(color='black', label='None')
+    ]
+    leg = plt.legend(handles=legend_elements, loc='lower left',
+               shadow=True, fancybox=True, facecolor='wheat',
+               edgecolor='black', framealpha=0.5)
 
     def update(frame_idx: int) -> tuple:
         """Update function that is required by FuncAnimation."""
@@ -118,13 +149,65 @@ def animate_conc(GS: GrayScott) -> None:
         artist.set_data(rgb)
         textbox.set_text(f"t: {frame_idx * GS.dt:.2f}")
         
-        return (artist, textbox)
+        return (artist, textbox, leg)
 
-    plt.title("Gray-Scott Animation")
+    plt.title(f"Animated Gray-Scott Concentration Field\n"
+              f"($D_u = {args.Du}$, $D_v = {args.Dv}$, $f = {args.f}$, $k = {args.k}$, "
+              f"$A_{{\\text{{noise}}}}={args.A}$, $u_{{\\text{{init}}}} = {args.u_init}$, "
+              f"$v_{{\\text{{init}}}} = {args.v_init}$)")
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
 
     _ = FuncAnimation(fig, update, frames=GS.grid_hist.shape[-1], interval=1, blit=True)
+    plt.show()
+
+def plot_concs(GS: GrayScott):
+    """Plot an figure containing 30 frames evenly spread out through the simulation.
+    
+    The concentration of u is assigned to the and R channel, whereas the 
+    concentration of v is assigned to the G and B channels. Thus fully red
+    means only u within that cell, fully cyan means only v in that cell.
+    Anything in between means both chemicals are present.
+
+    Args:
+        - GS (GrayScott): The GrayScott reaction diffusion object.
+    
+    """
+    if GS.grid_hist is None:
+        raise ValueError("No simulation history, please call GS.run()")
+    args = parse_args()
+    N = GS.grid.shape[0]
+
+    i_s = np.linspace(0, GS.iter_count, 30, dtype='int')
+
+    rgb = np.zeros((N, N, 3))
+
+    fig, axes = plt.subplots(3, 10, figsize=(18, 7), constrained_layout=True)
+
+    legend_elements = [
+        mpatches.Patch(color='red', label='Only $u$'),
+        mpatches.Patch(color='cyan', label='Only $v$'),
+        mpatches.Patch(color='white', label='Both ($u$ & $v$)'),
+        mpatches.Patch(color='black', label='None')
+    ]
+    for ax, i in itertools.zip_longest(axes.flatten(), i_s):
+        rgb[..., 0] = GS.grid_hist["u"][..., i]
+        rgb[..., 1] = GS.grid_hist["v"][..., i]
+        rgb[..., 2] = GS.grid_hist["v"][..., i]
+        np.clip(rgb, 0, 1, out=rgb)
+        ax.imshow(rgb)
+        ax.set_title(f"t={i * GS.dt}", fontsize=12)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    fig.legend(handles=legend_elements, loc='outside lower center', ncol=4,
+               shadow=True, fancybox=True, facecolor='wheat',
+               edgecolor='black', framealpha=0.5, fontsize=10)
+    
+    plt.suptitle(f"Evolution of Gray-Scott Concentration Fields through Time on {N}x{N} Grid\n"
+                 f"($D_u = {args.Du}$, $D_v = {args.Dv}$, $f = {args.f}$, $k = {args.k}$, "
+                 f"$A_{{\\text{{noise}}}}={args.A}$, $u_{{\\text{{init}}}} = {args.u_init}$, "
+                 f"$v_{{\\text{{init}}}} = {args.v_init}$)")
     plt.show()
 
 def plot_conc_statistics(GS: GrayScott) -> None:
@@ -166,7 +249,9 @@ def plot_conc_statistics(GS: GrayScott) -> None:
         f"$D_v$ = {args.Dv}\n"
         f"$f$ = {args.f}\n"
         f"$k$ = {args.k}\n"
-        f"Noise = {args.noise}"
+        f"$A_{{\\text{{noise}}}}$ = {args.A}"
+        f"$u_{{\\text{{init}}}}$ = {args.u_init}"
+        f"$v_{{\\text{{init}}}}$ = {args.v_init}"
     )
     ax_dict["B"].text(0.5, 0.5, parameter_text, transform=ax_dict["B"].transAxes, 
              fontsize=14, va='center', ha='center',
@@ -198,14 +283,15 @@ def seed_grid(GS: GrayScott, n: float) -> None:
         - n (float): The amplitude of the perturbations
     
     """
+    args = parse_args()
     N = GS.grid.shape[0]
-    GS.grid["u"] = np.full((N, N), 0.5)
+    GS.grid["u"] = np.full((N, N), args.u_init)
 
     # inner square of 10%
-    start = (N//2) - int(N*0.1)
-    end = (N//2) + int(N*0.1)
+    start = (N//2) - int(N*0.05)
+    end = (N//2) + int(N*0.05)
 
-    GS.grid["v"][start:end, start:end] = 0.25
+    GS.grid["v"][start:end, start:end] = args.v_init
 
     if n > 0:
         u_noise = GS.gen.uniform(-n, n, size=(N,N))
@@ -228,7 +314,7 @@ def main():
     }
     
     GS = GrayScott(args.N, args.dt, args.dx, consts)
-    seed_grid(GS, args.noise)
+    seed_grid(GS, args.A)
 
     GS.run(args.iterations)
 
@@ -236,6 +322,8 @@ def main():
         plot_final_conc(GS)
     elif args.plot == "animate":
         animate_conc(GS)
+    elif args.plot == "evolution":
+        plot_concs(GS)
     else:
         plot_conc_statistics(GS)
 

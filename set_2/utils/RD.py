@@ -59,6 +59,10 @@ class GeneralRD():
             - n_iters (int): Number of iterations to run.
             
         """
+        # include the initial state
+        if self.iter_count == 0:
+            self._frames.append(self.grid.astype([(name, "float16") for name in self.grid.dtype.names]).copy())
+
         if n_iters is not None:
             for _ in range(n_iters):
                 self._step()
