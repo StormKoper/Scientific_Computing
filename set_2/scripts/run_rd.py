@@ -229,7 +229,7 @@ def plot_conc_statistics(GS: GrayScott) -> None:
                                       constrained_layout=True,
                                       figsize=(12,8))
     
-    t_range = np.arange(GS.iter_count) * GS.dt
+    t_range = np.arange(GS.iter_count + 1) * GS.dt
     u_mean = np.mean(GS.grid_hist["u"], axis=(0, 1))
     v_mean = np.mean(GS.grid_hist["v"], axis=(0, 1))
 
@@ -249,9 +249,9 @@ def plot_conc_statistics(GS: GrayScott) -> None:
         f"$D_v$ = {args.Dv}\n"
         f"$f$ = {args.f}\n"
         f"$k$ = {args.k}\n"
-        f"$A_{{\\text{{noise}}}}$ = {args.A}"
-        f"$u_{{\\text{{init}}}}$ = {args.u_init}"
-        f"$v_{{\\text{{init}}}}$ = {args.v_init}"
+        f"$A_{{\\text{{noise}}}}$ = {args.A}\n"
+        f"$u_{{\\text{{init}}}}$ = {args.u_init}\n"
+        f"$v_{{\\text{{init}}}}$ = {args.v_init}\n"
     )
     ax_dict["B"].text(0.5, 0.5, parameter_text, transform=ax_dict["B"].transAxes, 
              fontsize=14, va='center', ha='center',
