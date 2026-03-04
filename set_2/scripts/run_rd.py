@@ -272,7 +272,7 @@ def plot_conc_statistics(GS: GrayScott) -> None:
 
     plt.show()
 
-def seed_grid(GS: GrayScott, n: float) -> None:
+def seed_grid(GS: GrayScott, A: float, u_init: float = 0.5, v_init: float = 0.25) -> None:
     """Seed the initial grid with concentrations for u and v.
 
     Chemical u is intialized to be 0.5 in each cell. An center square
@@ -282,22 +282,21 @@ def seed_grid(GS: GrayScott, n: float) -> None:
 
     Args:
         - GS (GrayScott): The GrayScott reaction diffusion object.
-        - n (float): The amplitude of the perturbations
+        - A (float): The amplitude of the perturbations
     
     """
-    args = parse_args()
     N = GS.grid.shape[0]
-    GS.grid["u"] = np.full((N, N), args.u_init)
+    GS.grid["u"] = np.full((N, N), u_init)
 
     # inner square of 10%
     start = (N//2) - int(N*0.05)
     end = (N//2) + int(N*0.05)
 
-    GS.grid["v"][start:end, start:end] = args.v_init
+    GS.grid["v"][start:end, start:end] = v_init
 
-    if n > 0:
-        u_noise = GS.gen.uniform(-n, n, size=(N,N))
-        v_noise = GS.gen.uniform(-n, n, size=(N,N))
+    if A > 0:
+        u_noise = GS.gen.uniform(-A, A, size=(N,N))
+        v_noise = GS.gen.uniform(-A, A, size=(N,N))
 
         GS.grid["u"] += u_noise
         GS.grid["v"] += v_noise
@@ -316,7 +315,7 @@ def main():
     }
     
     GS = GrayScott(args.N, args.dt, args.dx, consts)
-    seed_grid(GS, args.A)
+    seed_grid(GS, args.A, args.u_init, args.v_init)
 
     GS.run(args.iterations)
 
