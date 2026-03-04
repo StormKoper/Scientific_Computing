@@ -158,7 +158,9 @@ def animate_conc(GS: GrayScott) -> None:
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
 
-    _ = FuncAnimation(fig, update, frames=GS.grid_hist.shape[-1], interval=1, blit=True)
+    # only plot every 10th frame
+    frames = np.linspace(0, GS.grid_hist.shape[-1] - 1, GS.grid_hist[-1].shape[-1] // 10, dtype="int")
+    _ = FuncAnimation(fig, update, frames=frames, interval=1, blit=True)
     plt.show()
 
 def plot_concs(GS: GrayScott):
