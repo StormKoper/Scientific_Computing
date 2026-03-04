@@ -8,6 +8,7 @@ import itertools
 
 from ..utils.config import *  # noqa: F403
 from ..utils.DLA import DLA
+from ..utils.MC_DLA import MC_DLA
 
 def save_frames(N: int = 100, n_growth: int = 100, interval: int = 10):
     """Save the frames of the DLA growth"""
@@ -72,10 +73,16 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
         dlas[..., i] /= sims # average over simulations
     
     # random walk growth
-    for i, p_s in enumerate(np.linspace(0.2, 1, params)):
-        for seed in tqdm(mc_seeds, desc=f"Running MC simulations for p_s={p_s:.2f}", leave=False):
-            temp = np.random.default_rng(seed).choice([0,1], size=(N, N), p=[0.5, 0.5])
-            mcs[..., i] += temp
+    max_steps = int(grow_until * N * N * 10)  # convert grow_until to max_steps
+    for i, p_s in enumerate(np.linspace(0.1, 1.0, params)):
+        for j, seed in enumerate(tqdm(mc_seeds[i*sims:(i+1)*sims], desc=f"Running MC simulations for p_s={p_s:.2f}", leave=False)):
+            np.random.seed(int(seed.generate_state(1)[0]))  # set global seed for JIT
+            mc = MC_DLA(N, seed=seed)
+            for _ in range(max_steps):
+                mc.add_walker_ps_jit(p_s)
+                if mc.grid[0, :].any():  # stop if reaches top
+                    break
+            mcs[..., i] += mc.grid
         mcs[..., i] /= sims # average over simulations
 
     msd_grid = np.mean((dlas[..., :, None] - mcs[..., None, :]) ** 2, axis=[0,1])
@@ -209,4 +216,5 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
     return optimal_omegas
 
 if __name__ == "__main__":
-    find_optimal_omega(N=50, grow_until=0.8, params=5, sims=5)
+    compare_dla_rw(N=100, grow_until=0.8, params=10, sims=10)
+    #find_optimal_omega(N=50, grow_until=0.8, params=5, sims=5)
