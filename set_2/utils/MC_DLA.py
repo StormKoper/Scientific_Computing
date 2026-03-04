@@ -14,6 +14,9 @@ class MC_DLA():
         self.grid[-1, N // 2] = True
         self.growth_count = 0
 
+        self.start_x = 0 
+        self.start_y = self.gen.integers(0, self.N)
+
         self.grid_arr = None
         self.save_every = save_every
         if save_every:
@@ -41,11 +44,11 @@ class MC_DLA():
         while True:
             dx, dy = self.gen.choice([(0,1) , (1,0), (0,-1), (-1,0)])
 
-            new_x = x + dx
+            new_x = (x + dx) % self.N
             new_y = y + dy
 
             # If walker goes out of bounds remove it and try again
-            if not (0 <= new_x < self.N and 0 <= new_y < self.N):
+            if not (0 <= new_y < self.N):
                 return False
             
             # Update positions
@@ -73,7 +76,7 @@ class MC_DLA():
         for _ in range(N * N * 5):
             move = np.random.randint(0, 4)
             dx, dy = [(0,1), (0,-1), (1,0), (-1,0)][move]
-            nx, ny = x + dx, y + dy
+            nx, ny = x + dx, (y + dy) % N
 
             if not (0 <= nx < N and 0 <= ny < N): return False
             if grid[nx, ny]: continue

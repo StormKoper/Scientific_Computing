@@ -20,56 +20,57 @@ def calculate_fractal_density(grid):
     
     return density
 
-def single_sim(size=100, max_steps=1000, use_jit=True, seed=None):
+def single_sim(N=100, ps = 1.0, use_jit=True, seed=None):
     """Runs a single DLA simulation and plots the result."""
-    sim = MC_DLA(size, seed=seed)
-        
-    for _ in range(max_steps):
-        if use_jit:
-            sim.add_walker_jit()
-        else:
-            sim.add_walker()
+    sim = MC_DLA(N, use_jit=use_jit, seed=seed)
 
-        # Stop if cluster reaches the top
-        if sim.grid[0, :].any():
-            break
-    
+    sim.run(grow_until=0.8)
     density = calculate_fractal_density(sim.grid)
 
     plt.figure(figsize=(8, 8))
     plt.imshow(sim.grid, cmap='Blues', interpolation='nearest')
-    plt.title(f"DLA Cluster Size: {size}, N: {sim.particles_count}, Density: {sim.particles_count/(size * size)}")
+    plt.title(f"DLA Cluster Size: {N}, Density: {density:.4f}")
     plt.axis('on')
     plt.show()
 
-def sticking_probabilities_sim(size=100, max_steps=1000, ps_values=[0.1, 0.3, 0.7, 1.0], use_jit=True, seed=None):
+def sticking_probabilities_sim(N=100, ps_values=[0.01, 0.1, 0.3, 0.7, 1.0], use_jit=True, seed=None):
     """Runs multiple simulations to compare the effect of sticking probability."""
     n_plots = len(ps_values)
-    fig, axes = plt.subplots(1, n_plots, figsize=(4 * n_plots, 4), constrained_layout=True)
+    fig, axes = plt.subplots(1, n_plots, figsize=(n_plots * n_plots, n_plots), constrained_layout=True)
 
     for ax, ps in zip(axes, ps_values):
-        sim = MC_DLA(size, seed=seed)
-        
-        for _ in range(max_steps):
-            if use_jit:
-                sim.add_walker_ps_jit(ps)
-            else:
-                sim.add_walker_ps(ps)
-
-            # Stop if cluster reaches the top
-            if sim.grid[0, :].any():
-                break
+        sim = MC_DLA(N, seed=seed, p_s=ps, use_jit=use_jit)
+        sim.run(grow_until=0.8)
         
         density = calculate_fractal_density(sim.grid)
 
         ax.imshow(sim.grid, cmap='Blues', interpolation='nearest')
-        ax.set_title(f"$p_s$ = {ps}\nN={sim.particles_count} \nDensity={sim.particles_count/(size * size)}" )
+        ax.set_title(f"$p_s$ = {ps}\nDensity={density:.4f}" )
         ax.axis('on')
 
-    plt.suptitle(f"DLA sticking probabilities comparison ", fontsize=16)
+    plt.suptitle(f"DLA with sticking probabilities ", fontsize=16)
+    plt.show()
+
+def MC_density(N=100, ps_values = np.linspace(0.1, 1, 50), use_jit=True, seed=None):
+    """Computes density for each sticking probability"""
+    d_vals = []
+    
+    for ps in ps_values:
+        sim = MC_DLA(N, seed=seed, p_s=ps, use_jit=use_jit)
+        sim.run(grow_until=0.8)
+
+        density_vals = calculate_fractal_density(sim.grid)
+        d_vals.append(density_vals)
+
+    plt.figure(figsize=(8, 8))
+    plt.plot(ps_values, d_vals, marker='o', linestyle='-', markersize=4)
+    plt.xlabel('Sticking Probability ($p_s$)')
+    plt.ylabel('Fractal Density')
+    plt.title('Fractal Density vs Sticking Probability')
+    plt.grid(True)
     plt.show()
 
 if __name__ == "__main__":
-    np.random.seed(42) # For JIT implementation
-    single_sim(size=100, max_steps=150000, use_jit=True, seed=42)
-    sticking_probabilities_sim(size=100, max_steps=150000, use_jit=True, seed=42)
+    single_sim(N=100, use_jit=True, seed=42)
+    sticking_probabilities_sim(N=100, use_jit=True, seed=42)
+    MC_density(N=100, use_jit=True, seed=42)
