@@ -36,7 +36,7 @@ class MC_DLA():
     def add_walker(self):
         """Add a random walker with a sticking probability"""
         x = 0
-        y = self.gen.randint(0, self.N - 1) # Start at a random point at the top
+        y = self.gen.integers(0, self.N - 1) # Start at a random point at the top
 
         while True:
             dx, dy = self.gen.choice([(0,1) , (1,0), (0,-1), (-1,0)])
@@ -61,7 +61,7 @@ class MC_DLA():
     def _setup_jit(self):
         def jit_wrapper():
             """High Speed: Calls JIT-compiled walker"""
-            start_y = self.gen.randint(0, self.N - 1)
+            start_y = self.gen.integers(0, self.N - 1)
             return self.jit_walker(self.grid, self.N, 0, start_y, self.p_s)
         self.add_walker = jit_wrapper
 
