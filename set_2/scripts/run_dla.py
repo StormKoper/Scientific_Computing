@@ -68,7 +68,7 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
         for seed in tqdm(dla_seeds, desc=f"Running DLA simulations for eta={eta:.2f}", leave=False):
             dla = DLA(N=N, eta=eta, use_jit=True, seed=seed)
             dla.run(grow_until=grow_until)
-            dlas[..., i] += dla.obj_mask
+            dlas[..., i] += ~dla.obj_mask
         dlas[..., i] /= sims # average over simulations
     
     # random walk growth
@@ -78,7 +78,13 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
             mcs[..., i] += temp
         mcs[..., i] /= sims # average over simulations
 
-    msd_grid = np.mean((dlas[..., :, None] - mcs[..., None, :]) ** 2, axis=[0,1])
+    # compute mean squared difference between DLA and MC growth
+    # first the mean of the squares of DLA and MC growth
+    dlas_sq_mean = np.mean(np.square(dlas), axis=(0,1))
+    mcs_sq_mean = np.mean(np.square(mcs), axis=(0,1))
+    # then the cross term mean of DLA and MC growth
+    dlas_mcs_mean = dlas.reshape(-1, params).T @ mcs.reshape(-1, params) / (N*N)
+    msd_grid = dlas_sq_mean[:, None] + mcs_sq_mean[None, :] - 2 * dlas_mcs_mean
     plt.figure(figsize=(8, 6), constrained_layout=True)
     plt.imshow(msd_grid, cmap='viridis')
     plt.colorbar(label="Mean Squared Difference")
