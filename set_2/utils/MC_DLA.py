@@ -1,3 +1,4 @@
+from warnings import warn
 import numpy as np
 from numba import njit
 
@@ -14,6 +15,7 @@ class MC_DLA():
         self.growth_count = 0
 
         self.grid_arr = None
+        self.save_every = save_every
         if save_every:
             self._frames = [self.grid.copy()]
 
@@ -54,39 +56,63 @@ class MC_DLA():
             if self.candidate(x,y):
                 if self.gen.random() < self.p_s: # Sticking probability
                     self.grid[x, y] = True
-                    self.growth_count += 1
                     return True
-                
-    def add_walker_jit(self):
-        """High Speed: Calls JIT-compiled walker"""
-        start_y = self.gen.randint(0, self.N - 1)
 
-        rx, ry, stuck = self.jit_walker(self.grid, self.N, 0, start_y, self.p_s)
-        if stuck:
-            self.grid[rx, ry] = True
-            self.growth_count += 1
-        return stuck
+    def _setup_jit(self):
+        def jit_wrapper():
+            """High Speed: Calls JIT-compiled walker"""
+            start_y = self.gen.randint(0, self.N - 1)
+            return self.jit_walker(self.grid, self.N, 0, start_y, self.p_s)
+        self.add_walker = jit_wrapper
 
     @staticmethod
     @njit
-    def jit_walker(grid, size, start_x, start_y, ps):
+    def jit_walker(grid, N, start_x, start_y, ps):
         """JIT implementation of sticking probability walker procedure"""
         x, y = start_x, start_y
-        for _ in range(size * size * 5):
+        for _ in range(N * N * 5):
             move = np.random.randint(0, 4)
             dx, dy = [(0,1), (0,-1), (1,0), (-1,0)][move]
             nx, ny = x + dx, y + dy
 
-            if not (0 <= nx < size and 0 <= ny < size): return -1, -1, False
+            if not (0 <= nx < N and 0 <= ny < N): return False
             if grid[nx, ny]: continue
             x, y = nx, ny
 
             # Sticking probability
             for dx_s, dy_s in [(0,1), (0,-1), (1,0), (-1,0)]:
                 sx, sy = x + dx_s, y + dy_s
-                if 0 <= sx < size and 0 <= sy < size:
+                if 0 <= sx < N and 0 <= sy < N:
                     if grid[sx, sy]:
                         if np.random.random() < ps:
-                            return x, y, True
+                            grid[x, y] = True
+                            return True
                         break
-        return -1, -1, False
+        return False
+    
+    def _grow(self):
+        stuck = False
+        while not stuck:
+            stuck = self.add_walker()
+        self.growth_count += 1
+    
+    def run(self, n_growth: int|None = None, grow_until: float|None = None):
+        """Run the Monte Carlo DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
+        if n_growth is None and grow_until is None:
+            raise ValueError("Either n_growth or grow_until should be provided.")
+        elif n_growth is not None and grow_until is not None:
+            warn("Both n_growth and grow_until are provided. n_growth will be used as the stopping criterion.")
+        if n_growth is not None:
+            for _ in range(n_growth):
+                self._grow()
+                if self.save_every and self.growth_count % self.save_every == 0:
+                    self._frames.append(self.grid.copy())
+        elif grow_until is not None:
+            height_threshold = self.N - int(grow_until * self.N)
+            while not np.any(self.grid[height_threshold, :]):
+                self._grow()
+                if self.save_every and self.growth_count % self.save_every == 0:
+                    self._frames.append(self.grid.copy())
+        
+        if self.save_every:
+            self.x_arr = np.stack(self._frames, axis=-1)
