@@ -148,7 +148,7 @@ class DLA():
             warn("No growth candidates found. Not growing any new sites.")
             return
         # compute the growth probability for each site
-        conc_eta = self.x[:, :-1][candidates]**self.eta
+        conc_eta = np.maximum(self.x[:, :-1][candidates], 0)**self.eta
         if np.sum(conc_eta) == 0:
             warn("All candidate sites have zero concentration. Not growing any new sites.")
             return
