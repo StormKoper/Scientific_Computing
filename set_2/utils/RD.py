@@ -59,6 +59,10 @@ class GeneralRD():
             - n_iters (int): Number of iterations to run.
             
         """
+        # include the initial state
+        if self.iter_count == 0:
+            self._frames.append(self.grid.astype([(name, "float16") for name in self.grid.dtype.names]).copy())
+
         if n_iters is not None:
             for _ in range(n_iters):
                 self._step()
@@ -111,12 +115,10 @@ class GrayScott(GeneralRD):
         # update concentrations
         rows, cols = u.shape
         for i in prange(rows):
-            for j in prange(cols):
+            for j in range(cols):
                 laplace_u = (u[(i+1)%rows, j] + u[(i-1)%rows, j] + u[i, (j+1)%cols] + u[i, (j-1)%cols] - 4*u[i, j]) / dx**2
                 u_n[i, j] = u[i, j] + dt * ( Du * laplace_u - (u[i, j] * v[i, j]**2) + f*(1 - u[i, j]) )
         
-        for i in prange(rows):
-            for j in prange(cols):
                 laplace_v = (v[(i+1)%rows, j] + v[(i-1)%rows, j] + v[i, (j+1)%cols] + v[i, (j-1)%cols] - 4*v[i, j]) / dx**2
                 v_n[i, j] = v[i, j] + dt * ( Dv * laplace_v + (u[i, j] * v[i, j]**2) - (f + k) * v[i, j] )
 

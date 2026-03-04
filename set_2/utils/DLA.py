@@ -1,12 +1,10 @@
 from warnings import warn
-
 import numpy as np
 from numba import njit, prange
 
-
 class DLA():
     """Diffusion limited aggregation class"""
-    def __init__(self, N: int = 100, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, use_jit: bool = False, seed: int|None = None):
+    def __init__(self, N: int = 100, eta: float = 1.0, omega: float = 1.0, save_error: bool = False, save_every: int = 0, use_jit: bool = False, seed: int|None = None):
         self.x = np.linspace(1, 0, N)[None, :].repeat(N, axis=0).T
         self.eta = eta
         self.omega = omega
@@ -16,14 +14,17 @@ class DLA():
         if save_error: self.error_history = []
         
         self.iter_count = 0
+        self.growth_count = 0
 
         # initialize an obj_mask with no objects (True means empty, False means occupied)
         self.obj_mask = np.ones_like(self.x, dtype=bool)
         # seed the initial object in the middle of the bottom row
         self.obj_mask[-1, N//2] = False
 
-        self._frames = [np.ma.masked_where(self.obj_mask == False, self.x)]
         self.x_arr = None
+        self.save_every = save_every
+        if save_every:
+            self._frames = [np.ma.masked_where(self.obj_mask == False, self.x)]
 
         if use_jit:
             self._setup_jit()
@@ -148,7 +149,7 @@ class DLA():
             warn("No growth candidates found. Not growing any new sites.")
             return
         # compute the growth probability for each site
-        conc_eta = self.x[:, :-1][candidates]**self.eta
+        conc_eta = np.maximum(self.x[:, :-1][candidates], 0)**self.eta
         if np.sum(conc_eta) == 0:
             warn("All candidate sites have zero concentration. Not growing any new sites.")
             return
@@ -163,6 +164,7 @@ class DLA():
         if candidate_index[1] == 0:
             self.obj_mask[candidate_index[0], -1] = False
             self.x[candidate_index[0], -1] = 0.0
+        self.growth_count += 1
     
     def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5):
         """Run the DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
@@ -176,7 +178,8 @@ class DLA():
                 while error > epsilon:
                     error = self._step()
                 self._grow()
-                self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
+                if self.save_every and self.growth_count % self.save_every == 0:
+                    self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
         elif grow_until is not None:
             height_threshold = self.x.shape[0] - int(grow_until * self.x.shape[0])
             while np.all(self.obj_mask[height_threshold, :]):
@@ -184,6 +187,8 @@ class DLA():
                 while error > epsilon:
                     error = self._step()
                 self._grow()
-                self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
+                if self.save_every and self.growth_count % self.save_every == 0:
+                    self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
         
-        self.x_arr = np.ma.stack(self._frames, axis=-1)
+        if self.save_every:
+            self.x_arr = np.ma.stack(self._frames, axis=-1)

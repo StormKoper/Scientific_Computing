@@ -1,5 +1,4 @@
 import numpy as np
-
 from set_2.utils.DLA import DLA
 
 N = 20

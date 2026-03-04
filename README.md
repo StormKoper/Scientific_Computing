@@ -110,19 +110,25 @@ Below are the CLI commands to obtain the figures used in the report for set 1. N
   ```bash
   uv run -m set_2.scripts.run_rd --help
   ```
-* **Some Interesting Plots**
+* **Baseline Evolution Plot**
   ```bash
-  uv run -m set_2.scripts.run_rd
+  uv run -m set_2.scripts.run_rd -p evolution
   ```
+* **Baseline Final Plot with Noise**
   ```bash
-  uv run -m set_2.scripts.run_rd -p statspanel
+  uv run -m set_2.scripts.run_rd -p static -A 0.01
   ```
+* **Mitosis Final Plot with Noise**
   ```bash
-  uv run -m set_2.scripts.run_rd -f 0.098 -k 0.057 -N 100 --noise 0.7 -p static
+  uv run -m set_2.scripts.run_rd -p static -A 0.01 -f 0.028 -k 0.062 --u_init 1
   ```
+* **Solitons Final Plot with Noise**
   ```bash
-  uv run -m set_2.scripts.run_rd -f 0.029 -k 0.057 -N 100
-  uv run -m set_2.scripts.run_rd -f 0.029 -k 0.057 -N 100 -p statspanel
+  uv run -m set_2.scripts.run_rd -p static -A 0.01 -f 0.03 -k 0.06 --u_init 1
+  ```
+* **Flower Final Plot with Noise**
+  ```bash
+  uv run -m set_2.scripts.run_rd -p static -A 0.01 -f 0.055 -k 0.062 --u_init 1
   ```
 
 ### Misc
