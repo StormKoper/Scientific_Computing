@@ -44,8 +44,8 @@ class MC_DLA():
         while True:
             dx, dy = self.gen.choice([(0,1) , (1,0), (0,-1), (-1,0)])
 
-            new_x = (x + dx) % self.N
-            new_y = y + dy
+            new_x = x + dx
+            new_y = (y + dy) % self.N # Enforce periodicity
 
             # If walker goes out of bounds remove it and try again
             if not (0 <= new_y < self.N):
