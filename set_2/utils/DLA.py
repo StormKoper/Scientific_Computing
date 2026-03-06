@@ -133,7 +133,7 @@ class DLA():
     def _grow(self) -> bool:
         """Choose a candidate site for growth and update the obj_mask"""
         if np.any(np.isnan(self.x)):
-            warn("NaN values detected in concentration field. Not growing any new sites.")
+            warn("NaN values detected in concentration field. Not growing any new sites.", RuntimeWarning)
             return False
 
         obj_mask = self.obj_mask[:, :-1] # exclude final column
@@ -150,12 +150,12 @@ class DLA():
         candidates = obj_mask & has_obj_neighbor
         candidates[0, :] = False # prevent growth on the top boundary
         if not np.any(candidates):
-            warn("No growth candidates found. Not growing any new sites.")
+            warn("No growth candidates found. Not growing any new sites.", RuntimeWarning)
             return False
         # compute the growth probability for each site
         conc_eta = np.maximum(self.x[:, :-1][candidates], 0)**self.eta
         if np.sum(conc_eta) == 0:
-            warn("All candidate sites have zero concentration. Not growing any new sites.")
+            warn("All candidate sites have zero concentration. Not growing any new sites.", RuntimeWarning)
             return False
         probabilities = conc_eta / np.sum(conc_eta)
         # choose a candidate site based on the probabilities
@@ -171,7 +171,7 @@ class DLA():
         self.growth_count += 1
         return True
     
-    def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5, max_steps: int = 10000) -> bool:
+    def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5, max_steps: int = 50000) -> bool:
         """Run the DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
         if n_growth is None and grow_until is None:
             raise ValueError("Either n_growth or grow_until should be provided.")
@@ -193,7 +193,7 @@ class DLA():
                 error = self._step()
                 iters += 1
                 if iters > max_steps:
-                    warn(f"Maximum number of steps ({max_steps}) reached. Stopping simulation.")
+                    warn(f"Maximum number of steps ({max_steps}) reached. Stopping simulation.", RuntimeWarning)
                     return False
             if not self._grow():
                 return False

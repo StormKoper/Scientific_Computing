@@ -7,6 +7,7 @@ from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
 from numba import set_num_threads
 from tqdm import tqdm
+from warnings import catch_warnings, simplefilter
 
 from set_2.scripts.run_mc import calculate_fractal_density
 
@@ -159,23 +160,23 @@ def animate_growth():
     _ = FuncAnimation(fig, update, frames=dla.x_arr.shape[-1], interval=10, blit=True)
     plt.show()
 
-def _run_dla_for_heatmap(N: int, eta: float, grow_until: float, seed: int|None = None) -> float:
+def _run_dla_for_heatmap(N: int, eta: float, n_growth: int, seed: int|None = None) -> float:
     """Helper function to run a single DLA simulation for a given eta and return the final density."""
     dla = DLA(N=N, eta=eta, use_jit=True, seed=seed)
-    dla.run(grow_until=grow_until)
+    dla.run(n_growth=n_growth)
     return ~dla.obj_mask
 
-def _run_mc_for_heatmap(N: int, p_s: float, grow_until: float, seed: int|None = None) -> float:
+def _run_mc_for_heatmap(N: int, p_s: float, n_growth: int, seed: int|None = None) -> float:
     """Helper function to run a single MC simulation for a given p_s and return the final density."""
     mc = MC_DLA(N=N, p_s=p_s, use_jit=True, seed=seed)
-    mc.run(grow_until=grow_until)
+    mc.run(n_growth=n_growth)
     return mc.grid
 
-def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10):
+def compare_dla_rw(N: int = 100, n_growth: int = 100, params: int = 10, sims: int = 10):
     """Compare the DLA growth with random walk growth.
     Arguments:
         N: grid size
-        grow_until: the fraction of the grid to grow until
+        n_growth: the number of growth steps
         params: the number of different parameters to sweep for both DLA and random walk
         sims: the number of simulations to run for each parameter setting"""
     set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
@@ -187,16 +188,16 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
     tasks = itertools.product(np.linspace(0.0, 1.0, params), dla_seeds)
     print("Running DLA simulations in parallel...")
     results = Parallel(n_jobs=-1)(
-        delayed(_run_dla_for_heatmap)(N, eta, grow_until, seed)
+        delayed(_run_dla_for_heatmap)(N, eta, n_growth, seed)
         for eta, seed in tqdm(tasks, total=params*sims, desc="DLA Simulations")
     )
     dlas = np.array(results).reshape(params, sims, N, N).mean(axis=1)  # average over simulations
     
     # Monte Carlo growth
-    tasks = itertools.product(np.linspace(0.1, 1.0, params), mc_seeds)
+    tasks = itertools.product(np.logspace(-2.0, 0.0, params), mc_seeds)
     print("Running MC simulations in parallel...")
     results = Parallel(n_jobs=-1)(
-        delayed(_run_mc_for_heatmap)(N, p_s, grow_until, seed)
+        delayed(_run_mc_for_heatmap)(N, p_s, n_growth, seed)
         for p_s, seed in tqdm(tasks, total=params*sims, desc="MC Simulations")
     )
     mcs = np.array(results).reshape(params, sims, N, N).mean(axis=1)  # average over simulations
@@ -204,10 +205,10 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
     # compute mean squared difference between DLA and MC growth
     msd_grid = np.mean(np.square(dlas[:, None, ...] - mcs[None, :, ...]), axis=(2, 3))  # shape (params, params)
     plt.figure(figsize=(8, 6), constrained_layout=True)
-    plt.imshow(msd_grid, cmap='viridis')
+    plt.imshow(msd_grid, cmap='viridis_r')
     plt.colorbar(label="Mean Squared Difference")
     plt.title("Mean Squared Difference between DLA and MC Growth")
-    plt.xticks(ticks=np.arange(params), labels=[f"{p:.2f}" for p in np.linspace(0.2, 1, params)])
+    plt.xticks(ticks=np.arange(params), labels=[f"{p:.2f}" for p in np.linspace(0.1, 1, params)], rotation=90)
     plt.yticks(ticks=np.arange(params), labels=[f"{eta:.2f}" for eta in np.linspace(0, 1, params)])
     plt.xlabel("MC $p_s$")
     plt.ylabel("DLA $\\eta$")
@@ -215,28 +216,31 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
 
 def _run_dla_for_omega(N: int, eta: float, omega: float, grow_until: float, bins: int = 1, seed: int|None = None) -> float:
     """Helper function to run a single DLA simulation for a given omega and return the number of iterations to converge."""
-    iters = np.zeros(bins)
-    growths = np.zeros(bins)
-    dla = DLA(N=N, eta=eta, omega=omega, save_error=False, use_jit=True, seed=seed)
-    for bin in range(bins):
-        if dla.run(grow_until=(bin+1)*grow_until/bins):
-            iters[bin] = dla.iter_count - np.sum(iters[:bin]) # iterations for this bin only
-            growths[bin] = np.count_nonzero(~dla.obj_mask) - 1 - np.sum(growths[:bin]) # growth for this bin only
-        else:
-            break # stop if growth failed (e.g. due to NaN values)
+    with catch_warnings():
+        simplefilter("ignore", category=RuntimeWarning) # also ignore warnings in subprocesses
+        iters = np.zeros(bins)
+        growths = np.zeros(bins)
+        dla = DLA(N=N, eta=eta, omega=omega, save_error=False, use_jit=True, seed=seed)
+        for bin in range(bins):
+            if dla.run(grow_until=(bin+1)*grow_until/bins, max_steps=50000):
+                iters[bin] = dla.iter_count - np.sum(iters[:bin]) # iterations for this bin only
+                growths[bin] = np.count_nonzero(~dla.obj_mask) - 1 - np.sum(growths[:bin]) # growth for this bin only
+            else:
+                break # stop if growth failed (e.g. due to NaN values)
     return np.divide(iters, growths, out=np.full_like(iters, 100), where=growths!=0) # return iterations per growth, handle division by zero
 
-def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10, bins: int = 1) -> np.ndarray:
+def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10, bins: int = 1):
     """Find the optimal omega for SOR iteration of DLA at different eta.
     Arguments:
         N: grid size
         grow_until: the fraction of the grid to grow until
         params: the number of different eta values to sweep
-        sims: the number of simulations to run for each eta value"""
+        sims: the number of simulations to run for each eta value
+        bins: the number of bins to divide the growth into"""
     set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
     etas = np.linspace(0, 1, params)
-    min_omega, max_omega = 1.0, 1.95 # safely below divergence TODO: add a check for divergence set max_omega to 1.99
-    n_sweep = int((max_omega - min_omega) / 0.05) + 1 # sweep from min_omega to max_omega in steps of 0.05
+    min_omega, max_omega = 1.0, 1.9 # safely below divergence TODO: add a check for divergence set max_omega to 1.99
+    n_sweep = round((max_omega - min_omega) / 0.05) + 1 # sweep from min_omega to max_omega in steps of 0.05
     omegas = np.linspace(min_omega, max_omega, n_sweep)
     seeds = np.random.SeedSequence(42).spawn(sims)
 
@@ -251,9 +255,27 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
     print("Processing results and plotting...")
     results_3d = np.array(results).reshape(params, n_sweep, sims, bins)
     iterations = np.mean(results_3d, axis=2) # average over simulations
+    deviations = np.std(results_3d, axis=2) # std dev over simulations
+
+    # calculate and print best omega for each eta and bin
+    min_indices = np.argmin(iterations, axis=1)
+    row_idx = np.arange(params)[:, None]
+    bin_idx = np.arange(bins)
+    best_iterations = iterations[row_idx, min_indices, bin_idx] # shape (6, 3)
+    best_deviations = deviations[row_idx, min_indices, bin_idx] # shape (6, 3)
+    best_omegas = omegas[min_indices]                           # shape (6, 3)
+    for bin in range(bins):
+        print(f"\nGrowth until {((bin+1)*grow_until/bins)*100:.1f}%:")
+        print("-"*49)
+        print(f"|{'Etas':^10}|{'Best Omegas':^15}|{'Average Iterations':^20}|")
+        print("-"*49)
+        for eta, omega, iters, dev in zip(etas, best_omegas[:, bin], best_iterations[:, bin], best_deviations[:, bin]):
+            print(f"|{eta:^10.2f}|{omega:^15.3f}|{iters:^9.3f} ± {dev:^8.3f}|")
+        print("-"*49)
+
+    # plot iterations vs omega for each eta and bin
     y_min = np.min(iterations) * 0.9
     y_max = np.max(iterations) * 1.1
-
     fig, axes = plt.subplots(1, bins, figsize=(1+7*bins,6), constrained_layout=True, sharey=True)
     plt.suptitle(f"Parameter Sweep for Optimal $\\omega$ ($N={N}$)")
     axes[0].set_ylabel("Number of Iterations to Converge")
@@ -265,89 +287,11 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
         axes[bin].set_ylim(y_min, y_max)
         axes[bin].legend([f"$\\eta={eta:.2f}$" for eta in etas], fancybox=True, shadow=True, loc='upper left')
     plt.show()
-    
-    # golden section search for optimal omega
-    iterations = np.mean(iterations, axis=2) # average over bins
-    n_golden_section = 5
-    omegas_gs = [[] for _ in range(params)]
-    iterations_gs = [[] for _ in range(params)]
-    invphi = (np.sqrt(5) - 1) / 2 # 1/phi
-
-    # find the two omegas that are closest to the optimal omega found in the sweep
-    optimal_omega_ids = np.argmin(iterations, axis=1)
-    left_bound_ids = np.maximum(optimal_omega_ids - 1, 0)
-    right_bound_ids = np.minimum(optimal_omega_ids + 1, len(omegas) - 1)
-    a = omegas[left_bound_ids]
-    b = omegas[right_bound_ids]
-    
-    for i, eta in enumerate(etas):
-        omegas_gs[i].extend([a[i], b[i]])
-        iterations_gs[i].extend([iterations[i, left_bound_ids[i]], iterations[i, right_bound_ids[i]]])
-    
-    # iterate until we have done n_golden_section iterations
-    for _ in tqdm(range(n_golden_section), desc="Golden Section Iterations"):
-        c = b - (b - a) * invphi
-        d = a + (b - a) * invphi
-        # create a list of tasks for the new omegas to test in parallel
-        omegas_to_test = np.column_stack((c, d))
-        tasks = [
-            (etas[i], omegas_to_test[i, j], seed)
-            for i in range(len(etas))
-            for j in range(2)  # j=0 is c, j=1 is d
-            for seed in seeds
-        ]
-        # run the new tasks in parallel and collect results
-        results = Parallel(n_jobs=-1)(
-            delayed(_run_dla_for_omega)(N, eta, omega, grow_until, 1, seed) 
-            for eta, omega, seed in tasks
-        )
-        # reshape results to be (params, [c, d], sims) and average over simulations
-        results_3d = np.array(results).reshape(params, 2, sims)
-        iterations = np.mean(results_3d, axis=2)
-        # update the bounds a and b based on the new iterations
-        for i in range(params):
-            iters_c = iterations[i, 0]
-            iters_d = iterations[i, 1]
-            omegas_gs[i].extend([c[i], d[i]])
-            iterations_gs[i].extend([iters_c, iters_d])
-            if iters_c < iters_d:
-                b[i] = d[i]
-            else:
-                a[i] = c[i]
-
-    # the optimal omega is the midpoint of the final interval [a, b]
-    optimal_omegas = (a + b) / 2
-    # the best omega is the one with the least iterations in the golden section search
-    best_omegas = np.zeros(params)
-    best_iterations = np.zeros(params)
-    for i in range(params):
-        best_omegas[i] = omegas_gs[i][np.argmin(iterations_gs[i])]
-        best_iterations[i] = np.min(iterations_gs[i])
-
-    plt.figure(figsize=(8, 6), constrained_layout=True)
-    for omega, iters, eta in zip(omegas_gs, iterations_gs, etas):
-        plt.plot(omega, iters, marker='o', markersize=3, alpha=0.5, linestyle='--', label=f"$\\eta={eta:.2f}$")
-    plt.plot(best_omegas, best_iterations, marker='o', c='black', label="Optimal $\\omega$")
-    plt.xlabel("$\\omega$")
-    plt.ylabel("Number of Iterations to Converge")
-    plt.title(f"Golden Section Search for Optimal $\\omega$ ($N={N}$)")
-    plt.legend(fancybox=True, shadow=True, loc='upper left')
-    plt.yscale("log")
-    plt.show()
-
-    # print a little table in terminal of best omega's and corresponding iterations
-    print("\r\033[K" + "-"*59)
-    print(f"|{'Etas':^15}|{'Best Omegas':^20}|{'Average Iterations':^20}|")
-    print("-"*59)
-    for eta, omega, iters in zip(etas, best_omegas, best_iterations):
-        print(f"|{eta:^15.3f}|{omega:^20.5f}|{iters:^20.3f}|")
-    print("-"*59)
-
-    return optimal_omegas
 
 if __name__ == "__main__":
-    #find_optimal_omega(N=100, grow_until=0.45, params=5, sims=3, bins=3)
-    compare_dla_rw(N=100, grow_until=0.8, params=11, sims=5)
+    simplefilter("ignore", category=RuntimeWarning) # ignore warnings about NaN values during growth (e.g. due to divergence at high omega)
+    find_optimal_omega(N=100, grow_until=0.95, params=6, sims=25, bins=5)
+    #compare_dla_rw(N=100, n_growth=100, params=31, sims=10)
 
     # for part (a) where we have to check effect of eta values on structure
     #plot_5_panel()

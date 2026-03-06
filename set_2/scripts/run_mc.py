@@ -1,6 +1,7 @@
 from set_2.utils.MC_DLA import MC_DLA
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 def calculate_fractal_density(grid):
     """Calculate density based on the bounding box of the fractal."""
@@ -60,7 +61,7 @@ def MC_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=Tru
     for ps in ps_values:
         density_runs = []
         print(f"Running simulations for p_s = {ps:.2f}...") 
-        for i in range(n_runs):
+        for i in tqdm(range(n_runs), desc=f"p_s={ps:.2f}", leave=False):
             # Change seed per run so they aren't identical
             current_seed = seed + i if seed is not None else None
             sim = MC_DLA(N, seed=current_seed, p_s=ps, use_jit=use_jit)
@@ -79,7 +80,7 @@ def MC_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=Tru
 
     plt.figure(figsize=(8, 8))
     plt.plot(ps_values, avg_dvals, marker='o', linestyle='-', markersize=4)
-    plt.fill_between(ps_values, avg_dvals - std_dvals, avg_dvals + std_dvals, alpha=0.3, label='$\pm 1$ Std Dev')
+    plt.fill_between(ps_values, avg_dvals - std_dvals, avg_dvals + std_dvals, alpha=0.3, label='$\\pm 1$ Std Dev')
     plt.xlabel('Sticking Probability ($p_s$)')
     plt.ylabel('Fractal Density')
     plt.title(f'Average Fractal Density over {n_runs} runs vs Sticking Probabilities ')
