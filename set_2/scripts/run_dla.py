@@ -1,14 +1,121 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from tqdm import tqdm
-from numba import set_num_threads
-from joblib import Parallel, delayed
 import itertools
+import timeit
+
+import matplotlib.pyplot as plt
+import numpy as np
+from joblib import Parallel, delayed
+from matplotlib.animation import FuncAnimation
+from numba import set_num_threads
+from tqdm import tqdm
+
+from set_2.scripts.run_mc import calculate_fractal_density
 
 from ..utils.config import *  # noqa: F403
 from ..utils.DLA import DLA
 from ..utils.MC_DLA import MC_DLA
+
+
+def plot_single(N=100, eta=0.3, use_jit=True, seed=42, sims=10):
+    """Run and visualize an averaged DLA simulation."""
+    print(f"Plotting Single with {sims} simulations for eta = {eta:.2f}...", end="")
+    
+    seeds = np.random.SeedSequence(seed).spawn(sims)
+    avg_mask = np.zeros((N, N))
+    densities = []
+    
+    for i in range(sims):
+        sim = DLA(N, seed=seeds[i], eta=eta, use_jit=use_jit)
+        sim.run(grow_until=0.8)
+        
+        mask = ~sim.obj_mask
+        avg_mask += mask
+        densities.append(calculate_fractal_density(mask))
+        
+    avg_mask /= sims
+    avg_density = np.mean(densities)
+    std_density = np.std(densities)
+
+    print("\r", end="")
+
+
+    plt.figure(figsize=(10, 10))
+    plt.xticks([])
+    plt.yticks([])
+    plt.imshow(avg_mask, cmap='Greens', interpolation='nearest')
+    plt.title(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$\\eta$ = {eta}, Density={avg_density:.4f}±{std_density:.4f}")
+    plt.show()
+
+def plot_5_panel(N=100, etas=[0, 0.25, 0.5, 0.75, 1.0], use_jit=True, seed=42, sims=10):
+    """Run and visualize multiple DLA simuations to compare the effect of eta on growth structure."""
+    if len(etas) != 5:
+        print(f"{len(etas)} are too many/few eta-values for a 5-panel, please use provide 5.")
+        return
+    n_plots = len(etas)
+    _, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
+
+    seeds = np.random.SeedSequence(seed).spawn(n_plots * sims)
+    for i, (ax, eta) in enumerate(zip(axes, etas)): 
+        print(f"\rRunning {sims} simulations for eta = {eta:.2f}...", end="")
+        
+        avg_mask = np.zeros((N, N))
+        densities = []
+        
+        for j in range(sims):
+            current_seed = seeds[i * sims + j]
+            sim = DLA(N, seed=current_seed, eta=eta, use_jit=use_jit)
+            sim.run(grow_until=0.8)
+            
+            mask = ~sim.obj_mask
+            avg_mask += mask
+            densities.append(calculate_fractal_density(mask))
+            
+        avg_mask /= sims
+        avg_density = np.mean(densities)
+        std_density = np.std(densities)
+
+        ax.imshow(avg_mask, cmap='Reds', interpolation='nearest')
+        ax.set_title(f"$\\eta$ = {eta}\nDensity={avg_density:.4f}±{std_density:.4f}" )
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    print("\r", end="")
+
+    plt.suptitle(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
+    plt.show()
+
+def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
+    """Benchmarks the DLA JIT optimization against the base implementation."""
+    print("Warming up JIT optimization...")
+    warmup_dla = DLA(N=N, eta=0.5, use_jit=True, seed=42)
+    warmup_dla.run(n_growth=10)
+
+    base_times = np.zeros(reps)
+    jit_times = np.zeros(reps)
+
+    print(f"Running benchmark for DLA JIT vs Non-JIT (N={N}, grow_until={grow_until:.1f}, {reps} repeats)...")
+    for i in range(reps):
+        print(f"Repeat {i+1}/{reps}:")
+        
+        # Base benchmark
+        base_dla = DLA(N=N, eta=0.5, use_jit=False, seed=100+i)
+        start_time = timeit.default_timer()
+        base_dla.run(grow_until=grow_until)
+        base_time = timeit.default_timer() - start_time
+        base_times[i] = base_time
+        print(f"  Base time : {base_time:.4f} seconds")
+
+        # JIT benchmark
+        jit_dla = DLA(N=N, eta=0.5, use_jit=True, seed=100+i)
+        start_time = timeit.default_timer()
+        jit_dla.run(grow_until=grow_until)
+        jit_time = timeit.default_timer() - start_time
+        jit_times[i] = jit_time
+        print(f"  JIT time  : {jit_time:.4f} seconds")
+
+    if reps > 1:
+        print(f"Results - Base: {base_times.mean():.4f} ± {base_times.std():.4f}s, JIT: {jit_times.mean():.4f} ± {jit_times.std():.4f}s, Speedup: {base_times.mean()/jit_times.mean():.2f}x\n")
+    else:
+        print(f"Results - Base: {base_times[0]:.4f}s, JIT: {jit_times[0]:.4f}s, Speedup: {base_times[0]/jit_times[0]:.2f}x\n")
 
 def save_frames(N: int = 100, n_growth: int = 100, interval: int = 10):
     """Save the frames of the DLA growth"""
@@ -233,4 +340,13 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
     return optimal_omegas
 
 if __name__ == "__main__":
-    find_optimal_omega(N=100, grow_until=0.45, params=11, sims=10, bins=3)
+    #find_optimal_omega(N=100, grow_until=0.45, params=11, sims=10, bins=3)
+
+    # for part (a) where we have to check effect of eta values on structure
+    plot_5_panel()
+    
+    # for part (b) where we have to compare jit to original on 100x100 grid
+    benchmark_dla_jit()
+
+    # for part (b) where they say to try it on a larger gridsize
+    plot_single(N=200)
