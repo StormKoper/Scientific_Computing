@@ -23,7 +23,7 @@ class MC_DLA():
             self._frames = [self.grid.copy()]
 
         if use_jit:
-            self._setup_jit(seed)
+            self._setup_jit()
 
     def candidate(self, x, y):
         """Check for candidates"""
@@ -61,8 +61,9 @@ class MC_DLA():
                     self.grid[x, y] = True
                     return True
 
-    def _setup_jit(self, seed: int|None = None):
-        np.random.seed(seed) # set global seed for JIT
+    def _setup_jit(self):
+        jit_seed = int(self.gen.integers(0, 2**31 - 1))
+        np.random.seed(jit_seed) # set global seed for JIT
         def jit_wrapper():
             """High Speed: Calls JIT-compiled walker"""
             return self.jit_walker(self.grid, self.N, self.p_s)

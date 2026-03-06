@@ -63,7 +63,7 @@ class DLA():
         self._update_func = jit_wrapper
     
     @staticmethod
-    @njit(parallel=True, fastmath=False)
+    @njit(parallel=True, fastmath=True)
     def _update_jit(x: np.ndarray, omega: float, obj_mask: np.ndarray) -> float:
         """Optimized SOR iteration using numba JIT compilation and parallelization with red-black ordering."""
         rows, cols = x.shape

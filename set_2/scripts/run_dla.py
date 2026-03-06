@@ -159,6 +159,18 @@ def animate_growth():
     _ = FuncAnimation(fig, update, frames=dla.x_arr.shape[-1], interval=10, blit=True)
     plt.show()
 
+def _run_dla_for_heatmap(N: int, eta: float, grow_until: float, seed: int|None = None) -> float:
+    """Helper function to run a single DLA simulation for a given eta and return the final density."""
+    dla = DLA(N=N, eta=eta, use_jit=True, seed=seed)
+    dla.run(grow_until=grow_until)
+    return ~dla.obj_mask
+
+def _run_mc_for_heatmap(N: int, p_s: float, grow_until: float, seed: int|None = None) -> float:
+    """Helper function to run a single MC simulation for a given p_s and return the final density."""
+    mc = MC_DLA(N=N, p_s=p_s, use_jit=True, seed=seed)
+    mc.run(grow_until=grow_until)
+    return mc.grid
+
 def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10):
     """Compare the DLA growth with random walk growth.
     Arguments:
@@ -166,33 +178,31 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
         grow_until: the fraction of the grid to grow until
         params: the number of different parameters to sweep for both DLA and random walk
         sims: the number of simulations to run for each parameter setting"""
-    dlas = np.zeros((N, N, params))
-    mcs = np.zeros((N, N, params))
+    set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
     seeds = np.random.SeedSequence(42).spawn(2*sims)
     dla_seeds = seeds[sims:]
     mc_seeds = seeds[:sims]
+
     # DLA growth
-    for i, eta in enumerate(np.linspace(0, 1, params)):
-        for seed in tqdm(dla_seeds, desc=f"Running DLA simulations for eta={eta:.2f}", leave=False):
-            dla = DLA(N=N, eta=eta, use_jit=True, seed=seed)
-            dla.run(grow_until=grow_until)
-            dlas[..., i] += ~dla.obj_mask
-        dlas[..., i] /= sims # average over simulations
+    tasks = itertools.product(np.linspace(0.0, 1.0, params), dla_seeds)
+    print("Running DLA simulations in parallel...")
+    results = Parallel(n_jobs=-1)(
+        delayed(_run_dla_for_heatmap)(N, eta, grow_until, seed)
+        for eta, seed in tqdm(tasks, total=params*sims, desc="DLA Simulations")
+    )
+    dlas = np.array(results).reshape(params, sims, N, N).mean(axis=1)  # average over simulations
     
     # Monte Carlo growth
-    for i, p_s in enumerate(np.linspace(0.1, 1.0, params)):
-        for j, seed in enumerate(tqdm(mc_seeds[i*sims:(i+1)*sims], desc=f"Running MC simulations for p_s={p_s:.2f}", leave=False)):
-            mc = MC_DLA(N=N, p_s=p_s, use_jit=True, seed=seed)
-            mc.run(grow_until=grow_until)
-            mcs[..., i] += mc.grid
-        mcs[..., i] /= sims # average over simulations
+    tasks = itertools.product(np.linspace(0.1, 1.0, params), mc_seeds)
+    print("Running MC simulations in parallel...")
+    results = Parallel(n_jobs=-1)(
+        delayed(_run_mc_for_heatmap)(N, p_s, grow_until, seed)
+        for p_s, seed in tqdm(tasks, total=params*sims, desc="MC Simulations")
+    )
+    mcs = np.array(results).reshape(params, sims, N, N).mean(axis=1)  # average over simulations
 
     # compute mean squared difference between DLA and MC growth
-    # done in nested loops to avoid saving array of size (N, N, params, params)
-    msd_grid = np.zeros((params, params))
-    for i in range(params):
-        for j in range(params):
-            msd_grid[i, j] = np.mean(np.square(dlas[..., i] - mcs[..., j]))
+    msd_grid = np.mean(np.square(dlas[:, None, ...] - mcs[None, :, ...]), axis=(2, 3))  # shape (params, params)
     plt.figure(figsize=(8, 6), constrained_layout=True)
     plt.imshow(msd_grid, cmap='viridis')
     plt.colorbar(label="Mean Squared Difference")
@@ -337,13 +347,13 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
 
 if __name__ == "__main__":
     #find_optimal_omega(N=100, grow_until=0.45, params=5, sims=3, bins=3)
-    #compare_dla_rw(N=100, grow_until=0.8, params=5, sims=3)
+    compare_dla_rw(N=100, grow_until=0.8, params=11, sims=5)
 
     # for part (a) where we have to check effect of eta values on structure
-    plot_5_panel()
+    #plot_5_panel()
     
     # for part (b) where we have to compare jit to original on 100x100 grid
-    benchmark_dla_jit()
+    #benchmark_dla_jit()
 
     # for part (b) where they say to try it on a larger gridsize
-    plot_single(N=200)
+    #plot_single(N=200)
