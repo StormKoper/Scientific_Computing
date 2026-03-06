@@ -63,7 +63,7 @@ class DLA():
         self._update_func = jit_wrapper
     
     @staticmethod
-    @njit(parallel=True, fastmath=True)
+    @njit(parallel=True, fastmath=False)
     def _update_jit(x: np.ndarray, omega: float, obj_mask: np.ndarray) -> float:
         """Optimized SOR iteration using numba JIT compilation and parallelization with red-black ordering."""
         rows, cols = x.shape
@@ -130,8 +130,12 @@ class DLA():
         
         return error
     
-    def _grow(self):
+    def _grow(self) -> bool:
         """Choose a candidate site for growth and update the obj_mask"""
+        if np.any(np.isnan(self.x)):
+            warn("NaN values detected in concentration field. Not growing any new sites.")
+            return False
+
         obj_mask = self.obj_mask[:, :-1] # exclude final column
         # check cells for adjacency to an object
         padded = np.pad(obj_mask, pad_width=1, mode='wrap')
@@ -147,12 +151,12 @@ class DLA():
         candidates[0, :] = False # prevent growth on the top boundary
         if not np.any(candidates):
             warn("No growth candidates found. Not growing any new sites.")
-            return
+            return False
         # compute the growth probability for each site
         conc_eta = np.maximum(self.x[:, :-1][candidates], 0)**self.eta
         if np.sum(conc_eta) == 0:
             warn("All candidate sites have zero concentration. Not growing any new sites.")
-            return
+            return False
         probabilities = conc_eta / np.sum(conc_eta)
         # choose a candidate site based on the probabilities
         flat_index = self.gen.choice(np.flatnonzero(candidates), p=probabilities)
@@ -165,30 +169,37 @@ class DLA():
             self.obj_mask[candidate_index[0], -1] = False
             self.x[candidate_index[0], -1] = 0.0
         self.growth_count += 1
+        return True
     
-    def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5):
+    def run(self, n_growth: int|None = None, grow_until: float|None = None, epsilon: float = 10e-5, max_steps: int = 10000) -> bool:
         """Run the DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
         if n_growth is None and grow_until is None:
             raise ValueError("Either n_growth or grow_until should be provided.")
-        elif n_growth is not None and grow_until is not None:
-            warn("Both n_growth and grow_until are provided. n_growth will be used as the stopping criterion.")
+        # set growth threshold
         if n_growth is not None:
-            for _ in range(n_growth):
-                error = float('inf')
-                while error > epsilon:
-                    error = self._step()
-                self._grow()
-                if self.save_every and self.growth_count % self.save_every == 0:
-                    self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
-        elif grow_until is not None:
+            growth_threshold = n_growth
+        else:
+            growth_threshold = np.inf # effectively no threshold
+        # set height threshold
+        if grow_until is not None:
             height_threshold = self.x.shape[0] - int(grow_until * self.x.shape[0])
-            while np.all(self.obj_mask[height_threshold, :]):
-                error = float('inf')
-                while error > epsilon:
-                    error = self._step()
-                self._grow()
-                if self.save_every and self.growth_count % self.save_every == 0:
-                    self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
-        
+        else:
+            height_threshold = 1 # effectively no threshold
+        # run until either growth threshold or height threshold is reached
+        while np.all(self.obj_mask[height_threshold, :]) and self.growth_count < growth_threshold:
+            error = float('inf')
+            iters = 0
+            while error > epsilon:
+                error = self._step()
+                iters += 1
+                if iters > max_steps:
+                    warn(f"Maximum number of steps ({max_steps}) reached. Stopping simulation.")
+                    return False
+            if not self._grow():
+                return False
+            if self.save_every and self.growth_count % self.save_every == 0:
+                self._frames.append(np.ma.masked_where(self.obj_mask == False, self.x))
+        # save an array of states if save_every is set
         if self.save_every:
             self.x_arr = np.ma.stack(self._frames, axis=-1)
+        return True

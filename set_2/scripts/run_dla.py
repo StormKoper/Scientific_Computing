@@ -179,26 +179,20 @@ def compare_dla_rw(N: int = 100, grow_until: float = 0.8, params: int = 10, sims
             dlas[..., i] += ~dla.obj_mask
         dlas[..., i] /= sims # average over simulations
     
-    # random walk growth
-    max_steps = int(grow_until * N * N * 10)  # convert grow_until to max_steps
+    # Monte Carlo growth
     for i, p_s in enumerate(np.linspace(0.1, 1.0, params)):
         for j, seed in enumerate(tqdm(mc_seeds[i*sims:(i+1)*sims], desc=f"Running MC simulations for p_s={p_s:.2f}", leave=False)):
-            np.random.seed(int(seed.generate_state(1)[0]))  # set global seed for JIT
-            mc = MC_DLA(N, seed=seed)
-            for _ in range(max_steps):
-                mc.add_walker_ps_jit(p_s)
-                if mc.grid[0, :].any():  # stop if reaches top
-                    break
+            mc = MC_DLA(N=N, p_s=p_s, use_jit=True, seed=seed)
+            mc.run(grow_until=grow_until)
             mcs[..., i] += mc.grid
         mcs[..., i] /= sims # average over simulations
 
     # compute mean squared difference between DLA and MC growth
-    # first the mean of the squares of DLA and MC growth
-    dlas_sq_mean = np.mean(np.square(dlas), axis=(0,1))
-    mcs_sq_mean = np.mean(np.square(mcs), axis=(0,1))
-    # then the cross term mean of DLA and MC growth
-    dlas_mcs_mean = dlas.reshape(-1, params).T @ mcs.reshape(-1, params) / (N*N)
-    msd_grid = dlas_sq_mean[:, None] + mcs_sq_mean[None, :] - 2 * dlas_mcs_mean
+    # done in nested loops to avoid saving array of size (N, N, params, params)
+    msd_grid = np.zeros((params, params))
+    for i in range(params):
+        for j in range(params):
+            msd_grid[i, j] = np.mean(np.square(dlas[..., i] - mcs[..., j]))
     plt.figure(figsize=(8, 6), constrained_layout=True)
     plt.imshow(msd_grid, cmap='viridis')
     plt.colorbar(label="Mean Squared Difference")
@@ -215,10 +209,12 @@ def _run_dla_for_omega(N: int, eta: float, omega: float, grow_until: float, bins
     growths = np.zeros(bins)
     dla = DLA(N=N, eta=eta, omega=omega, save_error=False, use_jit=True, seed=seed)
     for bin in range(bins):
-        dla.run(grow_until=(bin+1)*grow_until/bins)
-        iters[bin] = dla.iter_count - np.sum(iters[:bin]) # iterations for this bin only
-        growths[bin] = np.count_nonzero(~dla.obj_mask) - 1 - np.sum(growths[:bin]) # growth for this bin only
-    return iters / growths
+        if dla.run(grow_until=(bin+1)*grow_until/bins):
+            iters[bin] = dla.iter_count - np.sum(iters[:bin]) # iterations for this bin only
+            growths[bin] = np.count_nonzero(~dla.obj_mask) - 1 - np.sum(growths[:bin]) # growth for this bin only
+        else:
+            break # stop if growth failed (e.g. due to NaN values)
+    return np.divide(iters, growths, out=np.full_like(iters, 100), where=growths!=0) # return iterations per growth, handle division by zero
 
 def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10, bins: int = 1) -> np.ndarray:
     """Find the optimal omega for SOR iteration of DLA at different eta.
@@ -229,8 +225,8 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
         sims: the number of simulations to run for each eta value"""
     set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
     etas = np.linspace(0, 1, params)
-    min_omega, max_omega = 1.0, 1.8 # safely below divergence TODO: add a check for divergence set max_omega to 1.99
-    n_sweep = int((max_omega - min_omega) / 0.1) + 1 # sweep from min_omega to max_omega in steps of 0.05
+    min_omega, max_omega = 1.0, 1.95 # safely below divergence TODO: add a check for divergence set max_omega to 1.99
+    n_sweep = int((max_omega - min_omega) / 0.05) + 1 # sweep from min_omega to max_omega in steps of 0.05
     omegas = np.linspace(min_omega, max_omega, n_sweep)
     seeds = np.random.SeedSequence(42).spawn(sims)
 
@@ -340,7 +336,8 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
     return optimal_omegas
 
 if __name__ == "__main__":
-    #find_optimal_omega(N=100, grow_until=0.45, params=11, sims=10, bins=3)
+    #find_optimal_omega(N=100, grow_until=0.45, params=5, sims=3, bins=3)
+    #compare_dla_rw(N=100, grow_until=0.8, params=5, sims=3)
 
     # for part (a) where we have to check effect of eta values on structure
     plot_5_panel()

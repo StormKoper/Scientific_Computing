@@ -23,7 +23,7 @@ class MC_DLA():
             self._frames = [self.grid.copy()]
 
         if use_jit:
-            self._setup_jit()
+            self._setup_jit(seed)
 
     def candidate(self, x, y):
         """Check for candidates"""
@@ -61,18 +61,19 @@ class MC_DLA():
                     self.grid[x, y] = True
                     return True
 
-    def _setup_jit(self):
+    def _setup_jit(self, seed: int|None = None):
+        np.random.seed(seed) # set global seed for JIT
         def jit_wrapper():
             """High Speed: Calls JIT-compiled walker"""
-            start_y = self.gen.integers(0, self.N - 1)
-            return self.jit_walker(self.grid, self.N, 0, start_y, self.p_s)
+            return self.jit_walker(self.grid, self.N, self.p_s)
         self.add_walker = jit_wrapper
 
     @staticmethod
     @njit
-    def jit_walker(grid, N, start_x, start_y, ps):
+    def jit_walker(grid, N, ps):
         """JIT implementation of sticking probability walker procedure"""
-        x, y = start_x, start_y
+        x = 0
+        y = np.random.randint(0, N - 1) # Start at a random point at the top
         for _ in range(N * N * 5):
             move = np.random.randint(0, 4)
             dx, dy = [(0,1), (0,-1), (1,0), (-1,0)][move]
@@ -103,19 +104,21 @@ class MC_DLA():
         """Run the Monte Carlo DLA simulation for a specified number of growth steps or until a certain growth threshold is reached. The growth threshold is defined as the fraction of the height of the grid that is reached by the highest object"""
         if n_growth is None and grow_until is None:
             raise ValueError("Either n_growth or grow_until should be provided.")
-        elif n_growth is not None and grow_until is not None:
-            warn("Both n_growth and grow_until are provided. n_growth will be used as the stopping criterion.")
+        # set growth threshold
         if n_growth is not None:
-            for _ in range(n_growth):
-                self._grow()
-                if self.save_every and self.growth_count % self.save_every == 0:
-                    self._frames.append(self.grid.copy())
-        elif grow_until is not None:
+            growth_threshold = n_growth
+        else:
+            growth_threshold = np.inf # effectively no threshold
+        # set height threshold
+        if grow_until is not None:
             height_threshold = self.N - int(grow_until * self.N)
-            while not np.any(self.grid[height_threshold, :]):
-                self._grow()
-                if self.save_every and self.growth_count % self.save_every == 0:
-                    self._frames.append(self.grid.copy())
-        
+        else:
+            height_threshold = 1 # effectively no threshold
+        # run until either growth threshold or height threshold is reached
+        while not np.any(self.grid[height_threshold, :]) and self.growth_count < growth_threshold:
+            self._grow()
+            if self.save_every and self.growth_count % self.save_every == 0:
+                self._frames.append(self.grid.copy())
+        # save an array of states if save_every is set
         if self.save_every:
             self.x_arr = np.stack(self._frames, axis=-1)
