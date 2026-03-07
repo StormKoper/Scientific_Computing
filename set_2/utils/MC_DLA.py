@@ -48,7 +48,7 @@ class MC_DLA():
             new_y = (y + dy) % self.N # Enforce periodicity
 
             # If walker goes out of bounds remove it and try again
-            if not (0 <= new_y < self.N):
+            if not (0 <= new_x < self.N):
                 return False
             
             # Update positions
