@@ -24,7 +24,7 @@ def plot_single(N=100, eta=0.3, use_jit=True, seed=42, sims=10):
     avg_mask = np.zeros((N, N))
     densities = []
     
-    for i in range(sims):
+    for i in tqdm(range(sims), desc=f"eta={eta:.2f}", leave=False):
         sim = DLA(N, seed=seeds[i], eta=eta, use_jit=use_jit)
         sim.run(grow_until=0.8)
         
@@ -60,7 +60,7 @@ def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10)
         avg_mask = np.zeros((N, N))
         densities = []
         
-        for j in range(sims):
+        for j in tqdm(range(sims), desc=f"eta={eta:.2f}", leave=False):
             current_seed = seeds[i * sims + j]
             sim = DLA(N, seed=current_seed, eta=eta, use_jit=use_jit)
             sim.run(grow_until=0.8)
@@ -83,16 +83,16 @@ def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10)
     plt.suptitle(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
     return fig
 
-def plot_dla_density(N=100, probs=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use_jit=True, seed=42):
+def plot_dla_density(N=100, etas=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use_jit=True, seed=42):
     """Computes and plots average density for normal DLA (eta)."""
     dla_avg, dla_std = [], []
     
-    for p in probs:
+    for eta in etas:
         dla_runs = []
-        for i in tqdm(range(n_runs), desc=f"eta={p:.2f}", leave=False):
+        for i in tqdm(range(n_runs), desc=f"eta={eta:.2f}", leave=False):
             current_seed = seed + i if seed else None
             
-            sim_dla = DLA(N, seed=current_seed, eta=p, use_jit=use_jit)
+            sim_dla = DLA(N, seed=current_seed, eta=eta, use_jit=use_jit)
             sim_dla.run(grow_until=0.8)
             dla_runs.append(calculate_fractal_density(~sim_dla.obj_mask))
         
@@ -102,8 +102,8 @@ def plot_dla_density(N=100, probs=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, us
     dla_avg, dla_std = np.array(dla_avg), np.array(dla_std)
 
     fig = plt.figure(figsize=(8, 6), constrained_layout=True)
-    plt.plot(probs, dla_avg, marker='s', linestyle='-', color="firebrick", markersize=4, label='DLA ($\\eta$)')
-    plt.fill_between(probs, dla_avg - dla_std, dla_avg + dla_std, color="firebrick", alpha=0.3, label='$\\pm 1$ Std Dev')
+    plt.plot(etas, dla_avg, marker='s', linestyle='-', color="firebrick", markersize=4, label='DLA ($\\eta$)')
+    plt.fill_between(etas, dla_avg - dla_std, dla_avg + dla_std, color="firebrick", alpha=0.3, label='$\\pm 1$ Std Dev')
     
     plt.xlabel('$\\eta$')
     plt.ylabel('Fractal Density')
@@ -113,16 +113,13 @@ def plot_dla_density(N=100, probs=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, us
 
 def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
     """Benchmarks the DLA JIT optimization against the base implementation."""
-    print("Warming up JIT optimization...")
     warmup_dla = DLA(N=N, eta=0.5, use_jit=True, seed=42)
     warmup_dla.run(n_growth=10)
 
     base_times = np.zeros(reps)
     jit_times = np.zeros(reps)
 
-    print(f"Running benchmark for DLA JIT vs Non-JIT (N={N}, grow_until={grow_until:.1f}, {reps} repeats)...")
     for i in range(reps):
-        print(f"Repeat {i+1}/{reps}:")
         
         # Base benchmark
         base_dla = DLA(N=N, eta=0.5, use_jit=False, seed=100+i)
@@ -130,7 +127,6 @@ def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
         base_dla.run(grow_until=grow_until)
         base_time = timeit.default_timer() - start_time
         base_times[i] = base_time
-        print(f"  Base time : {base_time:.4f} seconds")
 
         # JIT benchmark
         jit_dla = DLA(N=N, eta=0.5, use_jit=True, seed=100+i)
@@ -138,12 +134,11 @@ def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
         jit_dla.run(grow_until=grow_until)
         jit_time = timeit.default_timer() - start_time
         jit_times[i] = jit_time
-        print(f"  JIT time  : {jit_time:.4f} seconds")
 
     if reps > 1:
-        print(f"Results - Base: {base_times.mean():.4f} ± {base_times.std():.4f}s, JIT: {jit_times.mean():.4f} ± {jit_times.std():.4f}s, Speedup: {base_times.mean()/jit_times.mean():.2f}x\n")
+        print(f"Results ({reps} reps) - Base: {base_times.mean():.4f} ± {base_times.std():.4f}s, JIT: {jit_times.mean():.4f} ± {jit_times.std():.4f}s, Speedup: {base_times.mean()/jit_times.mean():.2f}x")
     else:
-        print(f"Results - Base: {base_times[0]:.4f}s, JIT: {jit_times[0]:.4f}s, Speedup: {base_times[0]/jit_times[0]:.2f}x\n")
+        print(f"Results - Base: {base_times[0]:.4f}s, JIT: {jit_times[0]:.4f}s, Speedup: {base_times[0]/jit_times[0]:.2f}x")
 
 def save_frames(N: int = 100, n_growth: int = 100, interval: int = 10):
     """Save the frames of the DLA growth"""
@@ -163,29 +158,35 @@ def save_frames(N: int = 100, n_growth: int = 100, interval: int = 10):
 
 def animate_growth():
     """Animate the growth of the DLA cluster"""
-    dla = DLA(N=100, eta=0.5, omega=1.0, use_jit=True, seed=42)
-    dla.run(n_growth=250)
+    dla = DLA(N=100, eta=1, omega=1.0, use_jit=True, seed=42, save_every=True)
+    dla.run(grow_until=0.8)
 
     cmap = plt.get_cmap('viridis')
     cmap.set_bad(color='white')  # set color for occupied sites
 
-    fig = plt.figure(constrained_layout=True)
+    fig = plt.figure(constrained_layout=True, figsize=(8,8))
     artist = plt.imshow(dla.x_arr[..., 0], cmap=cmap, vmin=0, vmax=1)
     ax = plt.gca()
     ax.set_aspect('equal')
-    title = ax.set_title("Growth Animation - Size 0")
+    textbox = ax.text(0.95, 0.95, "Size: 1",
+        transform=ax.transAxes,
+        verticalalignment="top",
+        horizontalalignment="right",
+        bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
+    )
 
     def update(frame_idx: int) -> tuple:
         """Update function that is required by FuncAnimation."""
         artist.set_data(dla.x_arr[..., frame_idx])
-        title.set_text(f"Growth Animation - Size {frame_idx}")
-        return (artist, title)
+        textbox.set_text(f"Size: {frame_idx + 2:.0f}")
+        return (artist, textbox)
 
+    plt.title("DLA Growth Animation ($\\eta = 1$)")
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
 
-    _ = FuncAnimation(fig, update, frames=dla.x_arr.shape[-1], interval=10, blit=True)
-    return fig
+    ani = FuncAnimation(fig, update, frames=dla.x_arr.shape[-1], interval=1, blit=True)
+    return ani
 
 def _run_dla_for_heatmap(N: int, eta: float, n_growth: int, seed: int|None = None) -> float:
     """Helper function to run a single DLA simulation for a given eta and return the final density."""
