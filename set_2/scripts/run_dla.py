@@ -38,12 +38,12 @@ def plot_single(N=100, eta=0.3, use_jit=True, seed=42, sims=10):
 
     print("\r" + " " * 80 + "\r", end="")
 
-    plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(10, 10))
     plt.xticks([])
     plt.yticks([])
     plt.imshow(avg_mask, cmap='Reds', interpolation='nearest')
     plt.title(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$\\eta$ = {eta}, Density={avg_density:.4f}±{std_density:.4f}")
-    plt.show()
+    return fig
 
 def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10):
     """Run and visualize multiple DLA simuations to compare the effect of eta on growth structure."""
@@ -51,7 +51,7 @@ def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10)
         print(f"{len(etas)} are too many/few eta-values for a 5-panel, please use provide 5.")
         return
     n_plots = len(etas)
-    _, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
 
     seeds = np.random.SeedSequence(seed).spawn(n_plots * sims)
     for i, (ax, eta) in enumerate(zip(axes, etas)): 
@@ -81,7 +81,7 @@ def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10)
     print("\r" + " " * 80 + "\r", end="")
 
     plt.suptitle(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
-    plt.show()
+    return fig
 
 def plot_dla_density(N=100, probs=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use_jit=True, seed=42):
     """Computes and plots average density for normal DLA (eta)."""
@@ -101,15 +101,15 @@ def plot_dla_density(N=100, probs=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, us
 
     dla_avg, dla_std = np.array(dla_avg), np.array(dla_std)
 
-    plt.figure(figsize=(8, 6), constrained_layout=True)
+    fig = plt.figure(figsize=(8, 6), constrained_layout=True)
     plt.plot(probs, dla_avg, marker='s', linestyle='-', color="firebrick", markersize=4, label='DLA ($\\eta$)')
     plt.fill_between(probs, dla_avg - dla_std, dla_avg + dla_std, color="firebrick", alpha=0.3, label='$\\pm 1$ Std Dev')
     
-    plt.xlabel('Relaxation Parameter ($\\eta$)')
+    plt.xlabel('$\\eta$')
     plt.ylabel('Fractal Density')
-    plt.title(f'DLA Density vs Relaxation Parameter (N={N}, {n_runs} runs)')
+    plt.title(f'DLA Density vs $\\eta$ (N={N}, {n_runs} runs)')
     plt.legend()
-    plt.show()
+    return fig
 
 def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
     """Benchmarks the DLA JIT optimization against the base implementation."""
@@ -185,7 +185,7 @@ def animate_growth():
     plt.ylabel("Space (y)")
 
     _ = FuncAnimation(fig, update, frames=dla.x_arr.shape[-1], interval=10, blit=True)
-    plt.show()
+    return fig
 
 def _run_dla_for_heatmap(N: int, eta: float, n_growth: int, seed: int|None = None) -> float:
     """Helper function to run a single DLA simulation for a given eta and return the final density."""

@@ -5,6 +5,7 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
+from matplotlib.figure import Figure
 
 from ..utils.config import *  # noqa: F403
 from ..utils.RD import GrayScott
@@ -53,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     
     return parser.parse_args()
 
-def plot_final_conc(GS: GrayScott) -> None:
+def plot_final_conc(GS: GrayScott) -> Figure:
     """Plot an image of the final state of the simulation.
     
     The concentration of u is assigned to the and R channel, whereas the 
@@ -74,7 +75,7 @@ def plot_final_conc(GS: GrayScott) -> None:
     rgb[..., 2] = GS.grid["v"]
     np.clip(rgb, 0, 1, out=rgb)
 
-    _ = plt.figure(figsize=(8, 8), constrained_layout=True)
+    fig = plt.figure(figsize=(8, 8), constrained_layout=True)
 
     legend_elements = [
         mpatches.Patch(color='red', label='Only $u$'),
@@ -93,9 +94,9 @@ def plot_final_conc(GS: GrayScott) -> None:
               f"$v_{{\\text{{init}}}} = {args.v_init}$)")
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
-    plt.show()
+    return fig
 
-def animate_conc(GS: GrayScott) -> None:
+def animate_conc(GS: GrayScott) -> Figure:
     """Animate the concentration fields from the simulation.
     
     The concentration of u is assigned to the and R channel, whereas the 
@@ -160,10 +161,10 @@ def animate_conc(GS: GrayScott) -> None:
 
     # only plot every 10th frame
     frames = np.linspace(0, GS.grid_hist.shape[-1] - 1, GS.grid_hist[-1].shape[-1] // 10, dtype="int")
-    _ = FuncAnimation(fig, update, frames=frames, interval=1, blit=True)
-    plt.show()
+    ani = FuncAnimation(fig, update, frames=frames, interval=1, blit=True)
+    return ani
 
-def plot_concs(GS: GrayScott):
+def plot_concs(GS: GrayScott) -> Figure:
     """Plot an figure containing 30 frames evenly spread out through the simulation.
     
     The concentration of u is assigned to the and R channel, whereas the 
@@ -210,9 +211,9 @@ def plot_concs(GS: GrayScott):
                  f"($D_u = {args.Du}$, $D_v = {args.Dv}$, $f = {args.f}$, $k = {args.k}$, "
                  f"$A_{{\\text{{noise}}}}={args.A}$, $u_{{\\text{{init}}}} = {args.u_init}$, "
                  f"$v_{{\\text{{init}}}} = {args.v_init}$)")
-    plt.show()
+    return fig
 
-def plot_conc_statistics(GS: GrayScott) -> None:
+def plot_conc_statistics(GS: GrayScott) -> Figure:
     """Plot concentration statistics from the Gray-Scott simulation.
     
     Figure consists of three panels: 
@@ -270,7 +271,7 @@ def plot_conc_statistics(GS: GrayScott) -> None:
     ax_dict["C"].set_title(f"1D Cross-Section of Final State (y = {cntr})")
     ax_dict["C"].legend(shadow=True, fancybox=True)
 
-    plt.show()
+    return fig
 
 def seed_grid(GS: GrayScott, A: float, u_init: float = 0.5, v_init: float = 0.25) -> None:
     """Seed the initial grid with concentrations for u and v.
@@ -320,13 +321,17 @@ def main():
     GS.run(args.iterations)
 
     if args.plot == "static":
-        plot_final_conc(GS)
+        _ = plot_final_conc(GS)
+        plt.show()
     elif args.plot == "animate":
-        animate_conc(GS)
+        _ = animate_conc(GS)
+        plt.show()
     elif args.plot == "evolution":
-        plot_concs(GS)
+        _ = plot_concs(GS)
+        plt.show()
     else:
-        plot_conc_statistics(GS)
+        _ = plot_conc_statistics(GS)
+        plt.show()
 
 if __name__ == "__main__":
     main()

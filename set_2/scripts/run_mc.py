@@ -47,12 +47,12 @@ def plot_single_MC(N=100, p_s=1.0, use_jit=True, seed=42, sims=10):
 
     print("\r" + " " * 80 + "\r", end="")
 
-    plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(10, 10))
     plt.xticks([])
     plt.yticks([])
     plt.imshow(avg_mask, cmap='Blues', interpolation='nearest')
     plt.title(f"Average MC-DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$p_s$ = {p_s}, Density={avg_density:.4f}±{std_density:.4f}")
-    plt.show()
+    return fig
 
 def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, seed=42, sims=10):
     """Run and visualize multiple DLA simuations to compare the effect of eta on growth structure."""
@@ -60,7 +60,7 @@ def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, se
         print(f"{len(ps_arr)} are too many/few p_s-values for a 5-panel, please provide 5.")
         return
     n_plots = len(ps_arr)
-    _, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
 
     seeds = np.random.SeedSequence(seed).spawn(n_plots * sims)
     for i, (ax, ps) in enumerate(zip(axes, ps_arr)): 
@@ -90,7 +90,7 @@ def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, se
     print("\r" + " " * 80 + "\r", end="")
 
     plt.suptitle(f"Average MC-DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
-    plt.show()
+    return fig
 
 def plot_mc_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=True, seed=42):
     """Computes average density for each sticking probability"""
