@@ -1,5 +1,6 @@
 import itertools
 import timeit
+from warnings import catch_warnings, simplefilter
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +8,6 @@ from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
 from numba import set_num_threads
 from tqdm import tqdm
-from warnings import catch_warnings, simplefilter
 
 from set_2.scripts.run_mc import calculate_fractal_density
 
@@ -36,17 +36,16 @@ def plot_single(N=100, eta=0.3, use_jit=True, seed=42, sims=10):
     avg_density = np.mean(densities)
     std_density = np.std(densities)
 
-    print("\r", end="")
-
+    print("\r" + " " * 80 + "\r", end="")
 
     plt.figure(figsize=(10, 10))
     plt.xticks([])
     plt.yticks([])
-    plt.imshow(avg_mask, cmap='Greens', interpolation='nearest')
+    plt.imshow(avg_mask, cmap='Reds', interpolation='nearest')
     plt.title(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$\\eta$ = {eta}, Density={avg_density:.4f}±{std_density:.4f}")
     plt.show()
 
-def plot_5_panel(N=100, etas=[0, 0.25, 0.5, 0.75, 1.0], use_jit=True, seed=42, sims=10):
+def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10):
     """Run and visualize multiple DLA simuations to compare the effect of eta on growth structure."""
     if len(etas) != 5:
         print(f"{len(etas)} are too many/few eta-values for a 5-panel, please use provide 5.")
@@ -79,9 +78,37 @@ def plot_5_panel(N=100, etas=[0, 0.25, 0.5, 0.75, 1.0], use_jit=True, seed=42, s
         ax.set_xticks([])
         ax.set_yticks([])
 
-    print("\r", end="")
+    print("\r" + " " * 80 + "\r", end="")
 
     plt.suptitle(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
+    plt.show()
+
+def plot_dla_density(N=100, probs=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use_jit=True, seed=42):
+    """Computes and plots average density for normal DLA (eta)."""
+    dla_avg, dla_std = [], []
+    
+    for p in probs:
+        dla_runs = []
+        for i in tqdm(range(n_runs), desc=f"eta={p:.2f}", leave=False):
+            current_seed = seed + i if seed else None
+            
+            sim_dla = DLA(N, seed=current_seed, eta=p, use_jit=use_jit)
+            sim_dla.run(grow_until=0.8)
+            dla_runs.append(calculate_fractal_density(~sim_dla.obj_mask))
+        
+        dla_avg.append(np.mean(dla_runs))
+        dla_std.append(np.std(dla_runs))
+
+    dla_avg, dla_std = np.array(dla_avg), np.array(dla_std)
+
+    plt.figure(figsize=(8, 6), constrained_layout=True)
+    plt.plot(probs, dla_avg, marker='s', linestyle='-', color="firebrick", markersize=4, label='DLA ($\\eta$)')
+    plt.fill_between(probs, dla_avg - dla_std, dla_avg + dla_std, color="firebrick", alpha=0.3, label='$\\pm 1$ Std Dev')
+    
+    plt.xlabel('Relaxation Parameter ($\\eta$)')
+    plt.ylabel('Fractal Density')
+    plt.title(f'DLA Density vs Relaxation Parameter (N={N}, {n_runs} runs)')
+    plt.legend()
     plt.show()
 
 def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
@@ -289,8 +316,9 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
     plt.show()
 
 if __name__ == "__main__":
-    simplefilter("ignore", category=RuntimeWarning) # ignore warnings about NaN values during growth (e.g. due to divergence at high omega)
-    find_optimal_omega(N=100, grow_until=0.95, params=6, sims=25, bins=5)
+    #plot_5_panel()
+    # simplefilter("ignore", category=RuntimeWarning) # ignore warnings about NaN values during growth (e.g. due to divergence at high omega)
+    # find_optimal_omega(N=100, grow_until=0.95, params=6, sims=25, bins=5)
     #compare_dla_rw(N=100, n_growth=100, params=31, sims=10)
 
     # for part (a) where we have to check effect of eta values on structure
@@ -301,3 +329,4 @@ if __name__ == "__main__":
 
     # for part (b) where they say to try it on a larger gridsize
     #plot_single(N=200)
+    plot_dla_density()

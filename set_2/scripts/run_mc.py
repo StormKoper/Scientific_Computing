@@ -1,7 +1,11 @@
-from set_2.utils.MC_DLA import MC_DLA
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+
+from set_2.utils.MC_DLA import MC_DLA
+
+from ..utils.config import *  # noqa: F403
+
 
 def calculate_fractal_density(grid):
     """Calculate density based on the bounding box of the fractal."""
@@ -21,39 +25,74 @@ def calculate_fractal_density(grid):
     
     return density
 
-def single_sim(N=100, ps = 1.0, use_jit=True, seed=None):
-    """Runs a single DLA simulation and plots the result."""
-    sim = MC_DLA(N, use_jit=use_jit, seed=seed)
-
-    sim.run(grow_until=0.8)
-    density = calculate_fractal_density(sim.grid)
-
-    plt.figure(figsize=(8, 8))
-    plt.imshow(sim.grid, cmap='Blues', interpolation='nearest')
-    plt.title(f"DLA Cluster Size: {N}, Density: {density:.4f}")
-    plt.axis('on')
-    plt.show()
-
-def sticking_probabilities_sim(N=100, ps_values=[0.01, 0.1, 0.3, 0.7, 1.0], use_jit=True, seed=None):
-    """Runs multiple simulations to compare the effect of sticking probability."""
-    n_plots = len(ps_values)
-    fig, axes = plt.subplots(1, n_plots, figsize=(n_plots * n_plots, n_plots), constrained_layout=True)
-
-    for ax, ps in zip(axes, ps_values):
-        print(f"Running simulations for p_s = {ps:.2f}...") 
-        sim = MC_DLA(N, seed=seed, p_s=ps, use_jit=use_jit)
+def plot_single_MC(N=100, p_s=1.0, use_jit=True, seed=42, sims=10):
+    """Run and visualize an averaged DLA simulation."""
+    print(f"Plotting Single with {sims} simulations for p_s = {p_s:.2f}...", end="")
+    
+    seeds = np.random.SeedSequence(seed).spawn(sims)
+    avg_mask = np.zeros((N, N))
+    densities = []
+    
+    for i in range(sims):
+        sim = MC_DLA(N, seed=seeds[i], p_s=p_s, use_jit=use_jit)
         sim.run(grow_until=0.8)
         
-        density = calculate_fractal_density(sim.grid)
+        mask = sim.grid
+        avg_mask += mask
+        densities.append(calculate_fractal_density(mask))
+        
+    avg_mask /= sims
+    avg_density = np.mean(densities)
+    std_density = np.std(densities)
 
-        ax.imshow(sim.grid, cmap='Blues', interpolation='nearest')
-        ax.set_title(f"$p_s$ = {ps}\nDensity={density:.4f}" )
-        ax.axis('on')
+    print("\r" + " " * 80 + "\r", end="")
 
-    plt.suptitle(f"DLA with sticking probabilities ", fontsize=16)
+    plt.figure(figsize=(10, 10))
+    plt.xticks([])
+    plt.yticks([])
+    plt.imshow(avg_mask, cmap='Blues', interpolation='nearest')
+    plt.title(f"Average MC-DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$p_s$ = {p_s}, Density={avg_density:.4f}±{std_density:.4f}")
     plt.show()
 
-def MC_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=True, seed=None):
+def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, seed=42, sims=10):
+    """Run and visualize multiple DLA simuations to compare the effect of eta on growth structure."""
+    if len(ps_arr) != 5:
+        print(f"{len(ps_arr)} are too many/few p_s-values for a 5-panel, please provide 5.")
+        return
+    n_plots = len(ps_arr)
+    _, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
+
+    seeds = np.random.SeedSequence(seed).spawn(n_plots * sims)
+    for i, (ax, ps) in enumerate(zip(axes, ps_arr)): 
+        print(f"\rRunning {sims} simulations for p_s = {ps:.2f}...", end="")
+        
+        avg_mask = np.zeros((N, N))
+        densities = []
+        
+        for j in range(sims):
+            current_seed = seeds[i * sims + j]
+            sim = MC_DLA(N, seed=current_seed, p_s=ps, use_jit=use_jit)
+            sim.run(grow_until=0.8)
+            
+            mask = sim.grid
+            avg_mask += mask
+            densities.append(calculate_fractal_density(mask))
+            
+        avg_mask /= sims
+        avg_density = np.mean(densities)
+        std_density = np.std(densities)
+
+        ax.imshow(avg_mask, cmap='Blues', interpolation='nearest')
+        ax.set_title(f"$p_s$ = {ps}\nDensity={avg_density:.4f}±{std_density:.4f}" )
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    print("\r" + " " * 80 + "\r", end="")
+
+    plt.suptitle(f"Average MC-DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
+    plt.show()
+
+def plot_mc_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=True, seed=42):
     """Computes average density for each sticking probability"""
     avg_dvals = []
     std_dvals = []
@@ -63,14 +102,14 @@ def MC_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=Tru
         print(f"Running simulations for p_s = {ps:.2f}...") 
         for i in tqdm(range(n_runs), desc=f"p_s={ps:.2f}", leave=False):
             # Change seed per run so they aren't identical
-            current_seed = seed + i if seed is not None else None
+            current_seed = seed + i
+            
             sim = MC_DLA(N, seed=current_seed, p_s=ps, use_jit=use_jit)
             sim.run(grow_until=0.8)
 
             density_vals = calculate_fractal_density(sim.grid)
             density_runs.append(density_vals)
         
-        # Average and standard dev over runs
         avg_dvals.append(np.mean(density_runs))
         std_dvals.append(np.std(density_runs))
 
@@ -78,16 +117,17 @@ def MC_density(N=100, ps_values=np.linspace(0.01, 1, 10), n_runs=25, use_jit=Tru
     avg_dvals = np.array(avg_dvals)
     std_dvals = np.array(std_dvals)
 
-    plt.figure(figsize=(8, 8))
-    plt.plot(ps_values, avg_dvals, marker='o', linestyle='-', markersize=4)
-    plt.fill_between(ps_values, avg_dvals - std_dvals, avg_dvals + std_dvals, alpha=0.3, label='$\\pm 1$ Std Dev')
+    plt.figure(figsize=(8, 6), constrained_layout=True)
+    plt.plot(ps_values, avg_dvals, marker='o', linestyle='-', color="darkcyan", markersize=4)
+    plt.fill_between(ps_values, avg_dvals - std_dvals, avg_dvals + std_dvals, color="darkcyan", alpha=0.3, label='$\\pm 1$ Std Dev')
     plt.xlabel('Sticking Probability ($p_s$)')
     plt.ylabel('Fractal Density')
-    plt.title(f'Average Fractal Density over {n_runs} runs vs Sticking Probabilities ')
-    plt.grid(True)
+    plt.title(f'MC-DLA Density vs Sticking Probability (N={N}, {n_runs} runs)')
     plt.show()
 
 if __name__ == "__main__":
-    single_sim(N=100, use_jit=True, seed=42)
-    sticking_probabilities_sim(N=100, use_jit=True, seed=42)
-    MC_density(N=100, use_jit=True, seed=42)
+    # single_sim(N=100, use_jit=True, seed=42)
+    # sticking_probabilities_sim(N=100, use_jit=True, seed=42)
+    plot_mc_density(N=100, use_jit=True, seed=42)
+    plot_single_MC(N=200)
+    plot_5_panel_MC()
