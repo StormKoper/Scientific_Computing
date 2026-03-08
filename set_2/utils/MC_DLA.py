@@ -1,6 +1,8 @@
 from warnings import warn
+
 import numpy as np
 from numba import njit
+
 
 class MC_DLA():
     """Random Walker DLA implementation"""
@@ -63,7 +65,13 @@ class MC_DLA():
 
     def _setup_jit(self):
         jit_seed = int(self.gen.integers(0, 2**31 - 1))
-        np.random.seed(jit_seed) # set global seed for JIT
+
+        @njit
+        def _seed_numba(seed_val):
+            np.random.seed(seed_val)
+            
+        _seed_numba(jit_seed)
+
         def jit_wrapper():
             """High Speed: Calls JIT-compiled walker"""
             return self.jit_walker(self.grid, self.N, self.p_s)

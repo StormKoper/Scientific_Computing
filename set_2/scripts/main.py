@@ -19,10 +19,10 @@ import matplotlib.pyplot as plt
 from set_2.scripts.run_dla import (
     animate_growth,
     benchmark_dla_jit,
+    find_optimal_omega,
     plot_5_panel,
     plot_dla_density,
     plot_single,
-    find_optimal_omega
 )
 from set_2.scripts.run_mc import plot_5_panel_MC, plot_mc_density
 from set_2.scripts.run_rd import (
