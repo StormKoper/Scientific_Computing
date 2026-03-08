@@ -79,8 +79,8 @@ def figures_part_1():
     plt.show()
 
     print("   Generating Optimal Omega plot and conducting t-tests ...")
-    _ = find_optimal_omega()
-    plt.savefig(FDIR / "optimal_omega.png", dpi=300)
+    _ = find_optimal_omega(sims=REPS)
+    plt.savefig(FDIR / "omega_sweep.png", dpi=300)
     plt.show()
 
     plt.close()

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
-from numba import set_num_threads
+from numba import get_num_threads, set_num_threads
 from scipy.stats import ttest_rel
 from tqdm import tqdm
 
@@ -259,7 +259,7 @@ def _run_dla_for_omega(N: int, eta: float, omega: float, grow_until: float, bins
     # return iterations per growth, handle division by zero by returning np.nan for divergent cases
     return np.divide(iters, growths, out=np.full_like(iters, np.nan), where=growths!=0)
 
-def find_optimal_omega(N: int = 100, grow_until: float = 0.8, sims: int = 10, bins: int = 1) -> plt.Figure:
+def find_optimal_omega(N: int = 100, grow_until: float = 0.9, sims: int = 5, bins: int = 3) -> plt.Figure:
     """Find the optimal omega for SOR iteration of DLA at different eta.
     Arguments:
         N: grid size
@@ -267,7 +267,6 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, sims: int = 10, bi
         params: the number of different eta values to sweep
         sims: the number of simulations to run for each eta value
         bins: the number of bins to divide the growth into"""
-    set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
     etas = [0.0, 0.5, 1.0] # test a few characteristic eta values (0 = no bias, 0.5 = moderate bias, 1.0 = strong bias)
     min_omega, max_omega = 1.0, 1.95 # safely below analytical divergence in empty grid at 2.0
     n_sweep = round((max_omega - min_omega) / 0.05) + 1 # sweep from min_omega to max_omega in steps of 0.05
@@ -275,14 +274,14 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, sims: int = 10, bi
     seeds = np.random.SeedSequence(42).spawn(sims)
 
     tasks = itertools.product(etas, omegas, seeds)
-    
-    print("Running initial parameter sweep in parallel...")
+    n_threads = get_num_threads()
+    set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
     results = Parallel(n_jobs=-1)(
         delayed(_run_dla_for_omega)(N, eta, omega, grow_until, bins, seed) 
-        for eta, omega, seed in tqdm(tasks, total=len(etas)*n_sweep*sims, desc="Parameter Sweep")
+        for eta, omega, seed in tqdm(tasks, total=len(etas)*n_sweep*sims, desc="Parameter Sweep", leave=False)
     )
+    set_num_threads(n_threads) # set numba to use the original number of threads
 
-    print("Processing results and plotting...")
     results_3d = np.array(results).reshape(len(etas), n_sweep, sims, bins)
     valid_mask = np.all(~np.isnan(results_3d), axis=2)
     iterations = np.where(valid_mask, np.mean(results_3d, axis=2), np.nan) # average over simulations
