@@ -43,7 +43,7 @@ def plot_single(N=100, eta=0.3, use_jit=True, seed=42, sims=10):
     plt.xticks([])
     plt.yticks([])
     plt.imshow(avg_mask, cmap='Reds', interpolation='nearest')
-    plt.title(f"Average DLA Cell Occupation (n={sims}, {N}x{N})\n80% Growth, $\\eta$ = {eta}, Density={avg_density:.4f}±{std_density:.4f}")
+    plt.title(f"Average Cell Occupation (Density={avg_density:.3f}±{std_density:.3f})")
     return fig
 
 def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10):
@@ -52,7 +52,7 @@ def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10)
         print(f"{len(etas)} are too many/few eta-values for a 5-panel, please use provide 5.")
         return
     n_plots = len(etas)
-    fig, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, n_plots, figsize=(18, 4), constrained_layout=True)
 
     seeds = np.random.SeedSequence(seed).spawn(n_plots * sims)
     for i, (ax, eta) in enumerate(zip(axes, etas)): 
@@ -81,7 +81,7 @@ def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10)
 
     print("\r" + " " * 80 + "\r", end="")
 
-    plt.suptitle(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
+    plt.suptitle(f"Average DLA Cell Occupation for Different $\\eta$ Values")
     return fig
 
 def plot_dla_density(N=100, etas=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use_jit=True, seed=42):
@@ -108,7 +108,7 @@ def plot_dla_density(N=100, etas=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use
     
     plt.xlabel('$\\eta$')
     plt.ylabel('Fractal Density')
-    plt.title(f'DLA Density vs $\\eta$ (N={N}, {n_runs} runs)')
+    plt.title(f'DLA Density vs $\\eta$')
     plt.legend(shadow=True, fancybox=True)
     return fig
 
@@ -333,9 +333,9 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.9, sims: int = 5, bin
         ax.errorbar(omegas, iterations[1, :, bin], yerr=deviations[1, :, bin], marker='s', linestyle='--', color=color, capsize=3)
         ax.errorbar(omegas, iterations[2, :, bin], yerr=deviations[2, :, bin], marker='d', linestyle=':', color=color, capsize=3)
         
-    ax.set_xlabel("$\\omega$")
+    ax.set_xlabel("Relaxation Parameter $\\omega$")
     ax.set_ylabel("Average Iterations to Converge")
-    ax.set_title(f"Parameter Sweep for Optimal $\\omega$ ($N={N}$)")
+    ax.set_title(f"Parameter Sweep for Optimal $\\omega$")
     ax.set_yscale("log")
     # increase density of y ticks
     ax.set_yticks([5, 10, 20, 30, 50, 80])

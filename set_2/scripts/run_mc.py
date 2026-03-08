@@ -51,7 +51,7 @@ def plot_single_MC(N=100, p_s=1.0, use_jit=True, seed=42, sims=10):
     plt.xticks([])
     plt.yticks([])
     plt.imshow(avg_mask, cmap='Blues', interpolation='nearest')
-    plt.title(f"Average MC-DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$p_s$ = {p_s}, Density={avg_density:.4f}±{std_density:.4f}")
+    plt.title(f"Average MC-DLA Cell Occupation (Density={avg_density:.3f}±{std_density:.3f})")
     return fig
 
 def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, seed=42, sims=10):
@@ -60,7 +60,7 @@ def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, se
         print(f"{len(ps_arr)} are too many/few p_s-values for a 5-panel, please provide 5.")
         return
     n_plots = len(ps_arr)
-    fig, axes = plt.subplots(1, n_plots, figsize=(18, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, n_plots, figsize=(18, 4), constrained_layout=True)
 
     seeds = np.random.SeedSequence(seed).spawn(n_plots * sims)
     for i, (ax, ps) in enumerate(zip(axes, ps_arr)): 
@@ -82,13 +82,13 @@ def plot_5_panel_MC(N=100, ps_arr=[0.01, 0.25, 0.5, 0.75, 1.0], use_jit=True, se
         std_density = np.std(densities)
 
         ax.imshow(avg_mask, cmap='Blues', interpolation='nearest')
-        ax.set_title(f"$p_s$ = {ps}\nDensity={avg_density:.4f}±{std_density:.4f}" )
+        ax.set_title(f"$p_s$ = {ps}\nDensity={avg_density:.3f}±{std_density:.3f}" )
         ax.set_xticks([])
         ax.set_yticks([])
 
     print("\r" + " " * 80 + "\r", end="")
 
-    plt.suptitle(f"Average MC-DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)")
+    plt.suptitle(f"Average MC-DLA Cell Occupation for Different Sticking Probabilities")
     return fig
 
 def plot_mc_density(N=100, ps_values=np.geomspace(0.03, 1.02, 12) - 0.02, n_runs=25, use_jit=True, seed=42):
@@ -121,5 +121,5 @@ def plot_mc_density(N=100, ps_values=np.geomspace(0.03, 1.02, 12) - 0.02, n_runs
     plt.fill_between(ps_values, avg_dvals - std_dvals, avg_dvals + std_dvals, color="darkcyan", alpha=0.3, label='$\\pm 1$ Std Dev')
     plt.xlabel('Sticking Probability ($p_s$)')
     plt.ylabel('Fractal Density')
-    plt.title(f'MC-DLA Density vs Sticking Probability (N={N}, {n_runs} runs)')
+    plt.title(f'MC-DLA Density vs Sticking Probability')
     return fig

@@ -89,8 +89,6 @@ def plot_final_conc(GS: GrayScott) -> Figure:
 
     plt.imshow(rgb)
     plt.title(f"Gray-Scott Concentration Field")
-    plt.xlabel("Space (x)")
-    plt.ylabel("Space (y)")
     return fig
 
 def animate_conc(GS: GrayScott) -> Figure:
