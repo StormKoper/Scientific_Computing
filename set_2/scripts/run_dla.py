@@ -7,6 +7,7 @@ import numpy as np
 from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
 from numba import set_num_threads
+from scipy.stats import ttest_rel
 from tqdm import tqdm
 
 from set_2.scripts.run_mc import calculate_fractal_density
@@ -255,9 +256,10 @@ def _run_dla_for_omega(N: int, eta: float, omega: float, grow_until: float, bins
                 growths[bin] = np.count_nonzero(~dla.obj_mask) - 1 - np.sum(growths[:bin]) # growth for this bin only
             else:
                 break # stop if growth failed (e.g. due to NaN values)
-    return np.divide(iters, growths, out=np.full_like(iters, 100), where=growths!=0) # return iterations per growth, handle division by zero
+    # return iterations per growth, handle division by zero by returning np.nan for divergent cases
+    return np.divide(iters, growths, out=np.full_like(iters, np.nan), where=growths!=0)
 
-def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, sims: int = 10, bins: int = 1):
+def find_optimal_omega(N: int = 100, grow_until: float = 0.8, sims: int = 10, bins: int = 1) -> plt.Figure:
     """Find the optimal omega for SOR iteration of DLA at different eta.
     Arguments:
         N: grid size
@@ -266,8 +268,8 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
         sims: the number of simulations to run for each eta value
         bins: the number of bins to divide the growth into"""
     set_num_threads(1) # set numba to use a single thread to avoid oversubscription with joblib
-    etas = np.linspace(0, 1, params)
-    min_omega, max_omega = 1.0, 1.9 # safely below divergence TODO: add a check for divergence set max_omega to 1.99
+    etas = [0.0, 0.5, 1.0] # test a few characteristic eta values (0 = no bias, 0.5 = moderate bias, 1.0 = strong bias)
+    min_omega, max_omega = 1.0, 1.95 # safely below analytical divergence in empty grid at 2.0
     n_sweep = round((max_omega - min_omega) / 0.05) + 1 # sweep from min_omega to max_omega in steps of 0.05
     omegas = np.linspace(min_omega, max_omega, n_sweep)
     seeds = np.random.SeedSequence(42).spawn(sims)
@@ -277,57 +279,81 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.8, params: int = 10, 
     print("Running initial parameter sweep in parallel...")
     results = Parallel(n_jobs=-1)(
         delayed(_run_dla_for_omega)(N, eta, omega, grow_until, bins, seed) 
-        for eta, omega, seed in tqdm(tasks, total=params*n_sweep*sims, desc="Parameter Sweep")
+        for eta, omega, seed in tqdm(tasks, total=len(etas)*n_sweep*sims, desc="Parameter Sweep")
     )
 
     print("Processing results and plotting...")
-    results_3d = np.array(results).reshape(params, n_sweep, sims, bins)
-    iterations = np.mean(results_3d, axis=2) # average over simulations
-    deviations = np.std(results_3d, axis=2) # std dev over simulations
-
-    # calculate and print best omega for each eta and bin
-    min_indices = np.argmin(iterations, axis=1)
-    row_idx = np.arange(params)[:, None]
-    bin_idx = np.arange(bins)
-    best_iterations = iterations[row_idx, min_indices, bin_idx] # shape (6, 3)
-    best_deviations = deviations[row_idx, min_indices, bin_idx] # shape (6, 3)
-    best_omegas = omegas[min_indices]                           # shape (6, 3)
+    results_3d = np.array(results).reshape(len(etas), n_sweep, sims, bins)
+    valid_mask = np.all(~np.isnan(results_3d), axis=2)
+    iterations = np.where(valid_mask, np.mean(results_3d, axis=2), np.nan) # average over simulations
+    deviations = np.where(valid_mask, np.std(results_3d, axis=2), np.nan) # std dev over simulations
+    min_indices = np.nanargmin(iterations, axis=1)
+    # statistical comparison of best omega with neighbors for each eta and bin using paired t-test
     for bin in range(bins):
-        print(f"\nGrowth until {((bin+1)*grow_until/bins)*100:.1f}%:")
-        print("-"*49)
-        print(f"|{'Etas':^10}|{'Best Omegas':^15}|{'Average Iterations':^20}|")
-        print("-"*49)
-        for eta, omega, iters, dev in zip(etas, best_omegas[:, bin], best_iterations[:, bin], best_deviations[:, bin]):
-            print(f"|{eta:^10.2f}|{omega:^15.3f}|{iters:^9.3f} ± {dev:^8.3f}|")
-        print("-"*49)
+        perc = ((bin+1)*grow_until/bins)*100
+        print(f"\nGrowth until {perc:.1f}%:")
+        print("-" * 70)
+        print(f"|{'Eta':^10}|{'Best Omega':^15}|{'p-val (Left)':^20}|{'p-val (Right)':^20}|")
+        print("-" * 70)
+        
+        for eta_idx, eta in enumerate(etas):
+            best_idx = min_indices[eta_idx, bin]
+            best_omega = omegas[best_idx]
+            best_iters = results_3d[eta_idx, best_idx, :, bin]
+            
+            # compare with the left neighbor (omega - 0.05)
+            p_left = "N/A"
+            if best_idx > 0:
+                left_iters = results_3d[eta_idx, best_idx - 1, :, bin]
+                if np.any(np.isnan(left_iters)):
+                    p_left = "Diverged"
+                else:
+                    res_left = ttest_rel(best_iters, left_iters, alternative='less')
+                    p_left = f"{res_left.pvalue:.4f}"
+                    
+            # compare with the right neighbor (omega + 0.05)
+            p_right = "N/A"
+            if best_idx < n_sweep - 1:
+                right_iters = results_3d[eta_idx, best_idx + 1, :, bin]
+                if np.any(np.isnan(right_iters)):
+                    p_right = "Diverged"
+                else:
+                    res_right = ttest_rel(best_iters, right_iters, alternative='less')
+                    p_right = f"{res_right.pvalue:.4f}"
+                    
+            print(f"|{eta:^10.2f}|{best_omega:^15.3f}|{p_left:^20}|{p_right:^20}|")
+        print("-" * 70)
 
     # plot iterations vs omega for each eta and bin
-    y_min = np.min(iterations) * 0.9
-    y_max = np.max(iterations) * 1.1
-    fig, axes = plt.subplots(1, bins, figsize=(1+7*bins,6), constrained_layout=True, sharey=True)
-    plt.suptitle(f"Parameter Sweep for Optimal $\\omega$ ($N={N}$)")
-    axes[0].set_ylabel("Number of Iterations to Converge")
-    for bin in range(bins):
-        axes[bin].plot(omegas, iterations.T[bin], marker='o')
-        axes[bin].set_xlabel("$\\omega$")
-        axes[bin].set_title(f"Growth until {((bin+1)*grow_until/bins)*100:.1f}%")
-        axes[bin].set_yscale("log")
-        axes[bin].set_ylim(y_min, y_max)
-        axes[bin].legend([f"$\\eta={eta:.2f}$" for eta in etas], fancybox=True, shadow=True, loc='upper left')
-    plt.show()
-
-if __name__ == "__main__":
-    #plot_5_panel()
-    # simplefilter("ignore", category=RuntimeWarning) # ignore warnings about NaN values during growth (e.g. due to divergence at high omega)
-    # find_optimal_omega(N=100, grow_until=0.95, params=6, sims=25, bins=5)
-    #compare_dla_rw(N=100, n_growth=100, params=31, sims=10)
-
-    # for part (a) where we have to check effect of eta values on structure
-    #plot_5_panel()
+    fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=True)
+    colors = plt.cm.viridis(np.linspace(0, 0.9, bins))
     
-    # for part (b) where we have to compare jit to original on 100x100 grid
-    #benchmark_dla_jit()
-
-    # for part (b) where they say to try it on a larger gridsize
-    #plot_single(N=200)
-    plot_dla_density()
+    for bin in range(bins):
+        color = colors[bin]
+        ax.errorbar(omegas, iterations[0, :, bin], yerr=deviations[0, :, bin], marker='o', linestyle='-', color=color, capsize=3)
+        ax.errorbar(omegas, iterations[1, :, bin], yerr=deviations[1, :, bin], marker='s', linestyle='--', color=color, capsize=3)
+        ax.errorbar(omegas, iterations[2, :, bin], yerr=deviations[2, :, bin], marker='d', linestyle=':', color=color, capsize=3)
+        
+    ax.set_xlabel("$\\omega$")
+    ax.set_ylabel("Average Iterations to Converge")
+    ax.set_title(f"Parameter Sweep for Optimal $\\omega$ ($N={N}$)")
+    ax.set_yscale("log")
+    # increase density of y ticks
+    ax.set_yticks([5, 10, 20, 30, 50, 80])
+    from matplotlib.ticker import StrMethodFormatter, NullFormatter
+    ax.yaxis.set_major_formatter(StrMethodFormatter('{x:.0f}'))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    
+    # setup legend: first add entries for eta values, then add entries for growth bins
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color='black', marker='o', linestyle='-', label='$\\eta = 0.0$'),
+        Line2D([0], [0], color='black', marker='s', linestyle='--', label='$\\eta = 0.5$'),
+        Line2D([0], [0], color='black', marker='d', linestyle=':', label='$\\eta = 1.0$')
+    ]
+    for bin in range(bins):
+        perc = ((bin+1)*grow_until/bins)*100
+        legend_elements.append(Line2D([0], [0], color=colors[bin], lw=4, label=f'Growth: {perc:.1f}%'))
+        
+    ax.legend(handles=legend_elements, loc='best')
+    return fig

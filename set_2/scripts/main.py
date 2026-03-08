@@ -22,6 +22,7 @@ from set_2.scripts.run_dla import (
     plot_5_panel,
     plot_dla_density,
     plot_single,
+    find_optimal_omega
 )
 from set_2.scripts.run_mc import plot_5_panel_MC, plot_mc_density
 from set_2.scripts.run_rd import (
@@ -75,6 +76,11 @@ def figures_part_1():
     print("   Generating Single 200x200 plot ...")
     _ = plot_single(N=200, sims=REPS)
     plt.savefig(FDIR / "single_DLA_N200.png", dpi=300)
+    plt.show()
+
+    print("   Generating Optimal Omega plot and conducting t-tests ...")
+    _ = find_optimal_omega()
+    plt.savefig(FDIR / "optimal_omega.png", dpi=300)
     plt.show()
 
     plt.close()
