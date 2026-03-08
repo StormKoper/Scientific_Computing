@@ -75,7 +75,7 @@ def plot_final_conc(GS: GrayScott) -> Figure:
     rgb[..., 2] = GS.grid["v"]
     np.clip(rgb, 0, 1, out=rgb)
 
-    fig = plt.figure(figsize=(8, 8), constrained_layout=True)
+    fig = plt.figure(figsize=(6, 5), constrained_layout=True)
 
     legend_elements = [
         mpatches.Patch(color='red', label='Only $u$'),
@@ -88,10 +88,7 @@ def plot_final_conc(GS: GrayScott) -> Figure:
                edgecolor='black', framealpha=0.5)
 
     plt.imshow(rgb)
-    plt.title(f"Gray-Scott Concentration Field at t={GS.iter_count* GS.dt:.2f}\n"
-              f"($D_u = {args.Du}$, $D_v = {args.Dv}$, $f = {args.f}$, $k = {args.k}$, "
-              f"$A_{{\\text{{noise}}}}={args.A}$, $u_{{\\text{{init}}}} = {args.u_init}$, "
-              f"$v_{{\\text{{init}}}} = {args.v_init}$)")
+    plt.title(f"Gray-Scott Concentration Field")
     plt.xlabel("Space (x)")
     plt.ylabel("Space (y)")
     return fig
@@ -120,7 +117,7 @@ def animate_conc(GS: GrayScott) -> Figure:
     rgb[..., 2] = GS.grid_hist["v"][..., 0]
     np.clip(rgb, 0, 1, out=rgb)
     
-    fig = plt.figure(figsize=(8,8), constrained_layout=True)
+    fig = plt.figure(figsize=(6, 5), constrained_layout=True)
 
     artist = plt.imshow(rgb)
     ax = plt.gca()
@@ -207,10 +204,7 @@ def plot_concs(GS: GrayScott) -> Figure:
                shadow=True, fancybox=True, facecolor='wheat',
                edgecolor='black', framealpha=0.5, fontsize=10)
     
-    plt.suptitle(f"Evolution of Gray-Scott Concentration Fields through Time on {N}x{N} Grid\n"
-                 f"($D_u = {args.Du}$, $D_v = {args.Dv}$, $f = {args.f}$, $k = {args.k}$, "
-                 f"$A_{{\\text{{noise}}}}={args.A}$, $u_{{\\text{{init}}}} = {args.u_init}$, "
-                 f"$v_{{\\text{{init}}}} = {args.v_init}$)")
+    plt.suptitle(f"Evolution of Gray-Scott Concentration Fields through Time")
     return fig
 
 def plot_conc_statistics(GS: GrayScott) -> Figure:

@@ -39,11 +39,11 @@ def plot_single(N=100, eta=0.3, use_jit=True, seed=42, sims=10):
 
     print("\r" + " " * 80 + "\r", end="")
 
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(6, 5), constrained_layout=True)
     plt.xticks([])
     plt.yticks([])
     plt.imshow(avg_mask, cmap='Reds', interpolation='nearest')
-    plt.title(f"Average DLA Cell Occupation (n={sims}, {N}x{N}, 80% Growth)\n$\\eta$ = {eta}, Density={avg_density:.4f}±{std_density:.4f}")
+    plt.title(f"Average DLA Cell Occupation (n={sims}, {N}x{N})\n80% Growth, $\\eta$ = {eta}, Density={avg_density:.4f}±{std_density:.4f}")
     return fig
 
 def plot_5_panel(N=100, etas=[0, 0.25, 1, 2, 5], use_jit=True, seed=42, sims=10):
@@ -102,14 +102,14 @@ def plot_dla_density(N=100, etas=np.geomspace(0.3, 10.3, 20)-0.3, n_runs=25, use
 
     dla_avg, dla_std = np.array(dla_avg), np.array(dla_std)
 
-    fig = plt.figure(figsize=(8, 6), constrained_layout=True)
+    fig = plt.figure(figsize=(6, 5), constrained_layout=True)
     plt.plot(etas, dla_avg, marker='s', linestyle='-', color="firebrick", markersize=4, label='DLA ($\\eta$)')
     plt.fill_between(etas, dla_avg - dla_std, dla_avg + dla_std, color="firebrick", alpha=0.3, label='$\\pm 1$ Std Dev')
     
     plt.xlabel('$\\eta$')
     plt.ylabel('Fractal Density')
     plt.title(f'DLA Density vs $\\eta$ (N={N}, {n_runs} runs)')
-    plt.legend()
+    plt.legend(shadow=True, fancybox=True)
     return fig
 
 def benchmark_dla_jit(N: int = 100, grow_until: float = 0.5, reps: int = 5):
@@ -233,7 +233,7 @@ def compare_dla_rw(N: int = 100, n_growth: int = 100, params: int = 10, sims: in
 
     # compute mean squared difference between DLA and MC growth
     msd_grid = np.mean(np.square(dlas[:, None, ...] - mcs[None, :, ...]), axis=(2, 3))  # shape (params, params)
-    plt.figure(figsize=(8, 6), constrained_layout=True)
+    plt.figure(figsize=(6, 5), constrained_layout=True)
     plt.imshow(msd_grid, cmap='viridis_r')
     plt.colorbar(label="Mean Squared Difference")
     plt.title("Mean Squared Difference between DLA and MC Growth")
@@ -324,7 +324,7 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.9, sims: int = 5, bin
         print("-" * 70)
 
     # plot iterations vs omega for each eta and bin
-    fig, ax = plt.subplots(figsize=(8, 6), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(6, 5), constrained_layout=True)
     colors = plt.cm.viridis(np.linspace(0, 0.9, bins))
     
     for bin in range(bins):
@@ -354,5 +354,5 @@ def find_optimal_omega(N: int = 100, grow_until: float = 0.9, sims: int = 5, bin
         perc = ((bin+1)*grow_until/bins)*100
         legend_elements.append(Line2D([0], [0], color=colors[bin], lw=4, label=f'Growth: {perc:.1f}%'))
         
-    ax.legend(handles=legend_elements, loc='best')
+    ax.legend(handles=legend_elements, loc='upper left', shadow=True, fancybox=True)
     return fig

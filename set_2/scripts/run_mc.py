@@ -47,7 +47,7 @@ def plot_single_MC(N=100, p_s=1.0, use_jit=True, seed=42, sims=10):
 
     print("\r" + " " * 80 + "\r", end="")
 
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(6, 5), constrained_layout=True)
     plt.xticks([])
     plt.yticks([])
     plt.imshow(avg_mask, cmap='Blues', interpolation='nearest')
@@ -115,7 +115,7 @@ def plot_mc_density(N=100, ps_values=np.geomspace(0.03, 1.02, 12) - 0.02, n_runs
     avg_dvals = np.array(avg_dvals)
     std_dvals = np.array(std_dvals)
 
-    fig = plt.figure(figsize=(8, 6), constrained_layout=True)
+    fig = plt.figure(figsize=(6, 5), constrained_layout=True)
     plt.xlim((0, 1.05))
     plt.plot(ps_values, avg_dvals, marker='o', linestyle='-', color="darkcyan", markersize=4)
     plt.fill_between(ps_values, avg_dvals - std_dvals, avg_dvals + std_dvals, color="darkcyan", alpha=0.3, label='$\\pm 1$ Std Dev')
@@ -123,11 +123,3 @@ def plot_mc_density(N=100, ps_values=np.geomspace(0.03, 1.02, 12) - 0.02, n_runs
     plt.ylabel('Fractal Density')
     plt.title(f'MC-DLA Density vs Sticking Probability (N={N}, {n_runs} runs)')
     return fig
-
-if __name__ == "__main__":
-    # single_sim(N=100, use_jit=True, seed=42)
-    # sticking_probabilities_sim(N=100, use_jit=True, seed=42)
-    plot_mc_density(N=100, use_jit=True, seed=42, n_runs=5)
-    plt.show()
-    # plot_single_MC(N=200)
-    # plot_5_panel_MC()
