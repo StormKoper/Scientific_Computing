@@ -38,8 +38,9 @@ python -m venv .venv
 source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
 pip install .
 ```
+<details>
+<summary><h2>Set 1</h2></summary>
 
-## Set 1
 Below are the CLI commands to obtain the figures used in the report for set 1. Note that if you are not using `uv` you can replace `uv run` with `python` after activating your virtual environment.
 ### 1D Wave Equation
 * **Question B** (Time development of 1D wave):
@@ -103,36 +104,29 @@ Below are the CLI commands to obtain the figures used in the report for set 1. N
   uv run -m set_1.scripts.benchmarks -method SOR -iterations 1000 -N 500 -repeats 5 --warmup_jit
   ```
 
-## Set 2
+</details>
 
-### Gray-Scott Model
-* **Info on CLI arguments**:
-  ```bash
-  uv run -m set_2.scripts.run_rd --help
-  ```
-* **Baseline Evolution Plot**
-  ```bash
-  uv run -m set_2.scripts.run_rd -p evolution
-  ```
-* **Baseline Final Plot with Noise**
-  ```bash
-  uv run -m set_2.scripts.run_rd -p static -A 0.01
-  ```
-* **Mitosis Final Plot with Noise**
-  ```bash
-  uv run -m set_2.scripts.run_rd -p static -A 0.01 -f 0.028 -k 0.062 --u_init 1
-  ```
-* **Solitons Final Plot with Noise**
-  ```bash
-  uv run -m set_2.scripts.run_rd -p static -A 0.01 -f 0.03 -k 0.06 --u_init 1
-  ```
-* **Flower Final Plot with Noise**
-  ```bash
-  uv run -m set_2.scripts.run_rd -p static -A 0.01 -f 0.055 -k 0.062 --u_init 1
-  ```
+<details>
+<summary><h2>Set 2</h2></summary>
 
-### Misc
-* Run tests with:
-  ```bash
-  uv run pytest set_2
-  ```
+The main entrypoint for set 2 is `main.py`. Running this file can be executed in two ways (Note that if you are not using uv you can replace uv run with python after activating your virtual environment).
+
+1. **Generate Report Figures**
+   ```bash
+   uv run -m set_2.scripts.main
+   ```
+   This will create all the figures used in the report. These will be outputted in a popup window as well as saved in `figures/`. During the execution, the terminal will display what it is working on currently.
+
+2. **Generate Animations**
+   ```bash
+   uv run -m set_2.scripts.main --animations
+   ```
+   This will NOT create any of the figures used in the report, but instead output some nice (non-required) animations we made for the DLA and Gray-Scott model.
+
+### Tests
+We have also included some tests for this project, which can be ran through:
+```bash
+uv run pytest set_2
+```
+
+</details>
