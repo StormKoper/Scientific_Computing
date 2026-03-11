@@ -1,19 +1,46 @@
 import numpy as np
 from numba import njit, prange
+from scipy.signal import convolve2d
 from warnings import warn
 
 class FD:
     def __init__(self, dx: float = .05, dy: float = .05, dt: float = .001, rho: float = 1.0, nu: float = .1):
+        # initialize parameters
         self.dx = dx
         self.dy = dy
         self.dt = dt
         self.rho = rho
         self.nu = nu
-        self.u = np.zeros(shape=(int(1 / dx), int(1 / dy)))
+        # initialize velocity and pressure fields
+        self.nx = int(2.2 / dx) + 1
+        self.ny = int(0.41 / dy) + 1
+        self.u = np.zeros(shape=(self.nx, self.ny))
         self.v = np.zeros_like(self.u)
         self.p = np.zeros_like(self.u)
-        self.u[:, 0] = 1.0 # inflow from the left
-        self.u[:, 1] = 0.1 * (1 + np.sin(2*np.pi*np.linspace(0, 1, self.u.shape[0]))) # small perturbation to trigger turbulence
+        self.u[0, :] = 1.0 # inflow from the left
+        # small perturbation to trigger turbulence
+        pert = np.sin(2*np.pi*np.linspace(0, 1, self.u.shape[1]-2))
+        self.u[1, 1:-1] = 0.1 * (1 + pert)
+        # set up the cylinder
+        x_coords = np.linspace(0, 2.2, self.nx)
+        y_coords = np.linspace(0, 0.41, self.ny)
+        X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
+        cx, cy, r = 0.2, 0.2, 0.05
+        self.cylinder_mask = (X - cx)**2 + (Y - cy)**2 <= r**2
+        self.u[self.cylinder_mask] = 0.0
+        self.v[self.cylinder_mask] = 0.0
+        x_kernel = np.array([
+            [0, 0, 0],
+            [1, 0, 1],
+            [0, 0, 0]
+        ])
+        y_kernel = np.array([
+            [0, 1, 0],
+            [0, 0, 0],
+            [0, 1, 0]
+        ])
+        self.x_neighbors = convolve2d(~self.cylinder_mask, x_kernel, mode='same', boundary='fill', fillvalue=2)
+        self.y_neighbors = convolve2d(~self.cylinder_mask, y_kernel, mode='same', boundary='fill', fillvalue=2)
 
     def run(self, time: float, p_threshold: float = 1e-4, p_max_iters: int = 1000):
         source = np.zeros_like(self.p)
@@ -24,24 +51,28 @@ class FD:
         rho_dx_dy = (self.rho * self.dx**2 * self.dy**2) / (2 * (self.dx**2 + self.dy**2))
         for _ in range(n_iters):
             self._p_source(source, rho_dx_dy, inv_dt, self.u, self.v, self.dx, self.dy)
-            iter_count, error = self._pressure(self.p, source, rho_dx_dy, self.dx, self.dy, p_threshold, p_max_iters)
+            iter_count, error = self._pressure(self.p, source, self.cylinder_mask, self.x_neighbors, self.y_neighbors,
+                                               rho_dx_dy, self.dx, self.dy, p_threshold, p_max_iters)
             if iter_count >= p_max_iters:
                 warn(f"Maximum iterations reached for pressure solver: {iter_count}")
             self._velocity(self.u, self.v, u_next, v_next, self.p, self.rho, self.nu, self.dt, self.dx, self.dy)
             self.u, u_next = u_next, self.u
             self.v, v_next = v_next, self.v
+            self.u[self.cylinder_mask] = 0.0
+            self.v[self.cylinder_mask] = 0.0
             CFL = (max(np.max(self.u), np.max(self.v)) * self.dt) / min(self.dx, self.dy)
             if CFL > 1:
                 warn(f"CFL condition violated: {CFL:.2f} > 1. Consider reducing dt or increasing dx/dy for stability.")
 
     def plot(self):
         import matplotlib.pyplot as plt
-        x = np.linspace(0, 1, self.u.shape[1])
-        y = np.linspace(0, 1, self.u.shape[0])
+        plt.figure(figsize=(10, 4), constrained_layout=True)
+        x = np.linspace(0, 2.2, self.u.shape[0])
+        y = np.linspace(0, 0.41, self.u.shape[1])
         X, Y = np.meshgrid(x, y)
-        plt.contourf(X, Y, self.p, levels=50, cmap='viridis')
+        plt.contourf(X, Y, self.p.T, levels=50, cmap='viridis')
         plt.colorbar(label='Pressure')
-        plt.streamplot(X, Y, self.u, self.v, color='white')
+        plt.streamplot(X, Y, self.u.T, self.v.T, color='white')
         plt.xlabel('x')
         plt.ylabel('y')
         plt.title('Pressure and Velocity Field')
@@ -60,8 +91,8 @@ class FD:
 
     @staticmethod
     @njit(parallel=True, fastmath=False)
-    def _pressure(p: np.ndarray, source: np.ndarray, rho_dx_dy: float,
-                  dx: float, dy: float, threshold: float = 1e-4, max_iters: int = 1000):
+    def _pressure(p: np.ndarray, source: np.ndarray, mask: np.ndarray, x_neighbors: np.ndarray, y_neighbors: np.ndarray,
+                  rho_dx_dy: float, dx: float, dy: float, threshold: float = 1e-4, max_iters: int = 1000):
         """Solves the Poisson equation for pressure using the red-black Gauss-Seidel method."""
         # NOTE: updating the error in parallel causes a race condition
         iter_count = 0
@@ -72,18 +103,20 @@ class FD:
             for i in prange(1, p.shape[0]-1):
                 start = 2 - (i % 2)
                 for j in range(start, p.shape[1]-1, 2):
-                    next = ((p[i, j+1] + p[i, j-1]) * dx**2 \
-                               + (p[i+1, j] + p[i-1, j]) * dy**2) \
-                                / (2 * (dx**2 + dy**2)) - rho_dx_dy * source[i, j]
+                    if mask[i, j]: continue # skip points inside the cylinder
+                    next = ((p[i, j+1] + p[i, j-1]) / x_neighbors[i, j] * dx**2 \
+                               + (p[i+1, j] + p[i-1, j]) / y_neighbors[i, j] * dy**2) \
+                                / (dx**2 + dy**2) - rho_dx_dy * source[i, j]
                     error = max(error, abs(next - p[i, j]))
                     p[i, j] = next
             # black points
             for i in prange(1, p.shape[0]-1):
                 start = 1 + (i % 2)
                 for j in range(start, p.shape[1]-1, 2):
-                    next = ((p[i, j+1] + p[i, j-1]) * dx**2 \
-                               + (p[i+1, j] + p[i-1, j]) * dy**2) \
-                                / (2 * (dx**2 + dy**2)) - rho_dx_dy * source[i, j]
+                    if mask[i, j]: continue # skip points inside the cylinder
+                    next = ((p[i, j+1] + p[i, j-1]) / x_neighbors[i, j] * dx**2 \
+                               + (p[i+1, j] + p[i-1, j]) / y_neighbors[i, j] * dy**2) \
+                                / (dx**2 + dy**2) - rho_dx_dy * source[i, j]
                     error = max(error, abs(next - p[i, j]))
                     p[i, j] = next
             iter_count += 1
