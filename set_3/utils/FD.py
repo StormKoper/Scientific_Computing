@@ -30,14 +30,14 @@ class FD:
         self.u[self.cylinder_mask] = 0.0
         self.v[self.cylinder_mask] = 0.0
         x_kernel = np.array([
-            [0, 0, 0],
-            [1, 0, 1],
-            [0, 0, 0]
-        ])
-        y_kernel = np.array([
             [0, 1, 0],
             [0, 0, 0],
             [0, 1, 0]
+        ])
+        y_kernel = np.array([
+            [0, 0, 0],
+            [1, 0, 1],
+            [0, 0, 0]
         ])
         self.x_neighbors = convolve2d(~self.cylinder_mask, x_kernel, mode='same', boundary='fill', fillvalue=2)
         self.y_neighbors = convolve2d(~self.cylinder_mask, y_kernel, mode='same', boundary='fill', fillvalue=2)
@@ -52,7 +52,7 @@ class FD:
         for _ in range(n_iters):
             self._p_source(source, rho_dx_dy, inv_dt, self.u, self.v, self.dx, self.dy)
             iter_count, error = self._pressure(self.p, source, self.cylinder_mask, self.x_neighbors, self.y_neighbors,
-                                               rho_dx_dy, self.dx, self.dy, p_threshold, p_max_iters)
+                                               self.dx, self.dy, p_threshold, p_max_iters)
             if iter_count >= p_max_iters:
                 warn(f"Maximum iterations reached for pressure solver: {iter_count}")
             self._velocity(self.u, self.v, u_next, v_next, self.p, self.rho, self.nu, self.dt, self.dx, self.dy)
@@ -92,7 +92,7 @@ class FD:
     @staticmethod
     @njit(parallel=True, fastmath=False)
     def _pressure(p: np.ndarray, source: np.ndarray, mask: np.ndarray, x_neighbors: np.ndarray, y_neighbors: np.ndarray,
-                  rho_dx_dy: float, dx: float, dy: float, threshold: float = 1e-4, max_iters: int = 1000):
+                  dx: float, dy: float, threshold: float = 1e-4, max_iters: int = 1000):
         """Solves the Poisson equation for pressure using the red-black Gauss-Seidel method."""
         # NOTE: updating the error in parallel causes a race condition
         iter_count = 0
@@ -104,9 +104,9 @@ class FD:
                 start = 2 - (i % 2)
                 for j in range(start, p.shape[1]-1, 2):
                     if mask[i, j]: continue # skip points inside the cylinder
-                    next = ((p[i, j+1] + p[i, j-1]) / x_neighbors[i, j] * dx**2 \
-                               + (p[i+1, j] + p[i-1, j]) / y_neighbors[i, j] * dy**2) \
-                                / (dx**2 + dy**2) - rho_dx_dy * source[i, j]
+                    next = ((p[i, j+1] + p[i, j-1]) / y_neighbors[i, j] * dx**2 \
+                               + (p[i+1, j] + p[i-1, j]) / x_neighbors[i, j] * dy**2) \
+                                / (dx**2 + dy**2) - source[i, j]
                     error = max(error, abs(next - p[i, j]))
                     p[i, j] = next
             # black points
@@ -114,9 +114,9 @@ class FD:
                 start = 1 + (i % 2)
                 for j in range(start, p.shape[1]-1, 2):
                     if mask[i, j]: continue # skip points inside the cylinder
-                    next = ((p[i, j+1] + p[i, j-1]) / x_neighbors[i, j] * dx**2 \
-                               + (p[i+1, j] + p[i-1, j]) / y_neighbors[i, j] * dy**2) \
-                                / (dx**2 + dy**2) - rho_dx_dy * source[i, j]
+                    next = ((p[i, j+1] + p[i, j-1]) / y_neighbors[i, j] * dx**2 \
+                               + (p[i+1, j] + p[i-1, j]) / x_neighbors[i, j] * dy**2) \
+                                / (dx**2 + dy**2) - source[i, j]
                     error = max(error, abs(next - p[i, j]))
                     p[i, j] = next
             iter_count += 1
