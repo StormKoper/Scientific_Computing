@@ -2,7 +2,7 @@ import numpy as np
 from utils.FD import FD
 
 def test_boundaries():
-    for P in [0, 1]:
+    for P in [0, 1, 2]:
         fd = FD(dx=0.05, dy=0.05, dt=0.001, rho=1.0, nu=0.1)
         fd.run(time=0.1, P=P)
 
