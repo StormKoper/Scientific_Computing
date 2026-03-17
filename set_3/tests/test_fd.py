@@ -1,5 +1,6 @@
 import numpy as np
 from utils.FD import FD
+from numba import njit, prange
 
 def test_boundaries():
     for P in [0, 1, 2]:
@@ -33,3 +34,19 @@ def test_boundaries():
 
             # 5. Test Pressure isolation inside the cylinder
             assert np.all(fd.p[2:-2, 2:-2][fd.mask[2:-2, 2:-2]] == 0.0), f"{P=}, {order=}: Pressure inside the cylinder should remain 0.0"
+
+@njit(parallel=True)
+def test_race_condition(a: np.ndarray):
+    maximum = 0
+    for i in prange(a.shape[0]):
+        for j in range(a.shape[1]):
+            maximum = max(maximum, a[i, j])
+    return maximum
+
+if __name__ == "__main__":
+    for _ in range(5):
+        a = np.random.rand(1000, 200)
+        max_value = np.max(a)
+        computed = test_race_condition(a)
+        print(f"Max value:    {max_value}")
+        print(f"Computed max: {computed}")
