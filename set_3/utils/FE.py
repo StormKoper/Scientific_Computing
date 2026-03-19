@@ -3,7 +3,7 @@ from math import sqrt
 
 import matplotlib.pyplot as plt
 import numpy as np
-from netgen.occ import Circle, OCCGeometry, Rectangle, X, Y, Z
+from netgen.occ import Circle, OCCGeometry, Rectangle, X, Y, Z, gp_Pnt2d
 from ngsolve import *  # noqa: F403
 
 from ..utils.config import *  # noqa: F403
@@ -11,7 +11,7 @@ from ..utils.config import *  # noqa: F403
 
 class FE:
 
-    def __init__(self, tau=0.001, nu=0.001, maxh=0.03):
+    def __init__(self, tau=0.0005, nu=0.001, maxh=0.03):
         self.tau = tau # time step
         self.nu = nu # viscosity
         self.maxh = maxh # maximum element size
@@ -32,7 +32,7 @@ class FE:
         rect.edges.Max(X).name = "outlet"
         
         # cylinder
-        cyl = Circle((0.2, 0.2), 0.05).Face()
+        cyl = Circle(gp_Pnt2d(0.2, 0.2), 0.05).Face()
         cyl.edges.name = "cyl"
         cyl.edges.maxh = 0.005  # force high resolution on the boundary layer
         
@@ -219,5 +219,6 @@ class FE:
 
 if __name__ == "__main__":
     NS = FE()
+    print(f"Re = {NS.reynolds_number()}")
     NS.run()
     NS.draw_sim()
