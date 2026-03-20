@@ -1,65 +1,132 @@
-import sys
-import os
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 
-# Ensure the parent directory is in the path so we can import from utils
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from utils.LBA import LBA
+from ..utils.LBA import LBA
 
 
-def plot_velocity(ax, lba, step):
-    """Plots the velocity magnitude of the simulation."""
-    speed = np.sqrt(lba.ux**2 + lba.uy**2)
-    speed[lba.obstacle] = np.nan
-    ax.clear()
-    ax.imshow(speed.T, origin='lower', cmap='jet', vmin=0, vmax=lba.U_inlet * 2.0, aspect='auto', extent=[0, lba.Nx, 0, lba.Ny])
-    ax.set_title(f"Velocity magnitude — step {step}")
-    plt.pause(0.01)
+def compute_divergence_norm(ux, uy, obstacle):
+    """L2 norm of div(u) over fluid cells (lattice spacing = 1)."""
+    dux_dx = 0.5 * (np.roll(ux, -1, axis=0) - np.roll(ux, 1, axis=0))
+    duy_dy = 0.5 * (np.roll(uy, -1, axis=1) - np.roll(uy, 1, axis=1))
+    div = dux_dx + duy_dy
+
+    fluid = ~obstacle
+    if np.count_nonzero(fluid) == 0:
+        return np.nan
+    return np.sqrt(np.mean(div[fluid] ** 2))
 
 
-def plot_vorticity(ax, lba, step):
-    """Plots the vorticity field of the simulation."""
-    vorticity = (np.roll(lba.uy, -1, axis=0) - np.roll(lba.uy, 1, axis=0) - 
-                 np.roll(lba.ux, -1, axis=1) + np.roll(lba.ux, 1, axis=1))
-    vorticity[lba.obstacle] = np.nan
-    ax.clear()
-    ax.imshow(vorticity.T, origin='lower', cmap='RdBu_r', vmin=-0.04, vmax=0.04, aspect='auto', extent=[0, lba.Nx, 0, lba.Ny])
-    ax.set_title(f"Vorticity field — step {step}")
-    plt.pause(0.01)
+def estimate_strouhal_from_probe(signal, sample_every, D, U):
+    """
+    Estimate St from FFT of a probe signal.
+    dt (lattice units) = 1, so sample_dt = sample_every.
+    """
+    if len(signal) < 128:
+        return np.nan
+
+    y = np.asarray(signal, dtype=float)
+    y = y - np.mean(y)
+
+    freqs = np.fft.rfftfreq(len(y), d=float(sample_every))
+    spec = np.abs(np.fft.rfft(y))
+
+    # Remove zero frequency
+    valid = freqs > 0
+    if not np.any(valid):
+        return np.nan
+
+    f_peak = freqs[valid][np.argmax(spec[valid])]
+    St = f_peak * D / U
+    return St
 
 
-def main():
-    # 1. Initialize the LBA solver
-    print("Initializing LBA solver...")
-    solver = LBA(Nx=300, Ny=120, U_inlet=0.12, Re=150)
-    
-    # 2. Simulation parameters
+def run_validation_sweep():
+    target_res = [10, 20, 50, 100, 150, 200]
+
+    # Keep geometry/velocity fixed across Re sweep
+    Nx, Ny = 300, 120
+    U_inlet = 0.12
+
+    re_list, div_list, st_list = [], [], []
+
+    # Runtime controls
     n_steps = 30000
-    plot_every = 25
-    plot_mode = 'velocity'  # Change to 'vorticity' if desired
-    
-    # 3. Setup real-time plotting
-    plt.ion()
-    fig, ax = plt.subplots(figsize=(10, 4.5), dpi=120)
+    sample_every = 10
+    transient_steps = 8000
 
-    # 4. Main simulation loop
-    print("Starting simulation...")
-    for step in range(1, n_steps + 1):
-        solver.step()  # Advance the simulation by one timestep using JIT
-        
-        if step % plot_every == 0:
-            if plot_mode == 'vorticity':
-                plot_vorticity(ax, solver, step)
-            else:
-                plot_velocity(ax, solver, step)
-                
-        if step % 1000 == 0:
-            print(f"Step {step}/{n_steps}")
-            
-    plt.ioff()
+    for Re in target_res:
+        print(f"Running LBA simulation for Re = {Re}")
+        t0 = time.time()
+
+        solver = LBA(Nx=Nx, Ny=Ny, U_inlet=U_inlet, Re=Re)
+
+        # Probe point downstream of cylinder centerline
+        i_probe = min(solver.cx_cyl + 6 * solver.r_cyl, solver.Nx - 2)
+        j_probe = solver.cy_cyl
+
+        probe_signal = []
+        for step in range(1, n_steps + 1):
+            solver.step()
+
+            if step >= transient_steps and step % sample_every == 0:
+                probe_signal.append(solver.uy[i_probe, j_probe])
+
+            if step % 5000 == 0:
+                print(f"  step {step}/{n_steps}")
+
+        div_norm = compute_divergence_norm(solver.ux, solver.uy, solver.obstacle)
+        St = estimate_strouhal_from_probe(
+            probe_signal, sample_every=sample_every, D=solver.D, U=solver.U_inlet
+        )
+
+        re_list.append(Re)
+        div_list.append(div_norm)
+        st_list.append(St)
+
+        print(
+            f"    Re: {Re}, L2-Div: {div_norm:.2e}, "
+            f"St: {St:.3f}, Time: {time.time() - t0:.2f}s"
+        )
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    # 1) Divergence plot
+    axes[0].plot(re_list, div_list, marker="o", linestyle="-", color="tab:blue")
+    axes[0].set_yscale("log")
+    axes[0].set_title("Divergence vs. Reynolds Number")
+    axes[0].set_xlabel("Reynolds Number (Re)")
+    axes[0].set_ylabel("L2-Norm of Divergence")
+
+    # 2) Accuracy plot (Strouhal)
+    axes[1].scatter(
+        re_list,
+        st_list,
+        facecolors="none",
+        edgecolors="tab:red",
+        linewidths=2,
+        s=80,
+        label="Simulated (LBA)",
+        zorder=10,
+    )
+    axes[1].scatter(
+        [100],
+        [0.300],
+        marker="*",
+        s=200,
+        color="gold",
+        edgecolor="black",
+        label="DFG 2D-2 Benchmark",
+        zorder=5,
+    )
+    axes[1].set_title("Physical Accuracy: Strouhal Number Validation")
+    axes[1].set_xlabel("Reynolds Number (Re)")
+    axes[1].set_ylabel("Strouhal Number (St)")
+    axes[1].legend(fancybox=True, shadow=True)
+
+    plt.tight_layout()
     plt.show()
 
 
 if __name__ == "__main__":
-    main()
+    run_validation_sweep()
