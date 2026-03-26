@@ -39,6 +39,11 @@ def parse_args() -> argparse.Namespace:
         help="Use NGSolve GUI for visualization instead of matplotlib",
         action="store_true"
     )
+    parser.add_argument(
+        "--raw",
+        help="Use raw signal values and enforce a 0.5m distance from targets",
+        action="store_true"
+    )
     return parser.parse_args()
 
 # ============================================================================
@@ -165,10 +170,10 @@ masks = [IfPos(r_meas**2 - ((x - xt)**2 + (y - yt)**2), 1, 0) for (xt, yt) in ta
 # 5. SIGNAL EVALUATION 
 # ============================================================================
 
-def evaluate_router_position(x_r, y_r):
+def evaluate_router_position(x_r, y_r, use_raw=False):
     """
     Evaluates the wave field for a given router position and computes the 
-    average signal strength (in relative dB) at predefined target locations.
+    average signal strength (in relative dB or raw) at predefined target locations.
     """
     # source is given by the Gaussian pulse, here sigma denotes the std
     # of the gaussian pulse, thus at 1sigma, the amplitude has dropped by
@@ -186,19 +191,22 @@ def evaluate_router_position(x_r, y_r):
     # magnitude of signal (modulus)
     mod_u = sqrt(gfu.real**2 + gfu.imag**2)
     
-    db_scores = []
+    scores = []
     for m in masks:
         # calculate the average value inside probe point radius
         linear_avg = Integrate(mod_u * m, mesh) / meas_area
         
-        # convert to relative db
-        db_val = 20 * np.log10((linear_avg + 1e-12) / A)
-        db_scores.append(db_val)
+        if use_raw:
+            scores.append(linear_avg)
+        else:
+            # convert to relative db
+            db_val = 20 * np.log10((linear_avg + 1e-12) / A)
+            scores.append(db_val)
         
-    # sum the relative dbs to get a final score
-    total_signal_db = sum(db_scores)
+    # sum the relative dbs or raw values to get a final score
+    total_signal = sum(scores)
 
-    return total_signal_db
+    return total_signal
 
 # ============================================================================
 # 6. OPTIMIZATION FOR BEST ROUTER PLACEMENT
@@ -225,27 +233,37 @@ def is_inside_wall(x, y, buffer=0.05):
             
     return False
 
-def objective(pos):
+def is_close_to_target(x, y):
+    for tx, ty in targets:
+        if np.sqrt((x - tx)**2 + (y - ty)**2) <= 0.5:
+            return True
+    return False
+
+def objective(pos, use_raw=False):
     """ Scipy minimizes perfectly, so return negative signal. """
     x_r, y_r = pos
 
     # in wall check and penalty
     if is_inside_wall(x_r, y_r, buffer=0.05):
         return float('inf')
+        
+    if is_close_to_target(x_r, y_r):
+        return float('inf')
 
-    sig = evaluate_router_position(x_r, y_r)
+    sig = evaluate_router_position(x_r, y_r, use_raw=use_raw)
     return -sig
 
-def optimize_router(use_gui=False):
+def optimize_router(use_gui=False, use_raw=False):
     print("Starting optimization using Differential Evolution (global search)...")
     start_time = time.time()
     
     # we restrict possible router positions inside the 10x8 apartment 
     bounds = [(0.5, 9.5), (0.5, 7.5)]
     
-    # differential_evolution avoids local minima which occur heavily in wave interferences
+    # differential_evolution to avoid local minima
     result = differential_evolution(
         objective,
+        args=(use_raw,),
         bounds=bounds,
         strategy='best1bin', 
         popsize=10,          
@@ -266,18 +284,21 @@ def optimize_router(use_gui=False):
     print(f"Elapsed Time : {elapsed:.2f} s")
     print(f"Evaluations  : {result.nfev}")
     print(f"Best Position: X = {result.x[0]:.2f} m, Y = {result.x[1]:.2f} m")
-    print(f"Best Signal  : {-result.fun:.2f} dB")
+    
+    unit = "raw" if use_raw else "dB"
+    print(f"Best Signal  : {-result.fun:.2f} {unit}")
     print("="*50)
     
     print("Evaluating best position for visualization...")
-    draw_field_at_position(result.x[0], result.x[1], use_gui=use_gui)
+    draw_field_at_position(result.x[0], result.x[1], use_gui=use_gui, use_raw=use_raw)
     
     return result.x
 
-def draw_field_at_position(x_r, y_r, use_gui=False):
+def draw_field_at_position(x_r, y_r, use_gui=False, use_raw=False):
     """ Evaluate and visualize the field for a given router position. """
-    total_signal = evaluate_router_position(x_r, y_r)
-    print(f"Total Signal  : {total_signal:.2f} dB")
+    total_signal = evaluate_router_position(x_r, y_r, use_raw=use_raw)
+    unit = "raw" if use_raw else "dB"
+    print(f"Total Signal  : {total_signal:.2f} {unit}")
     if use_gui:
         open_GUI(x_r, y_r)
         input("Press Enter to close visualization and exit...")
@@ -394,9 +415,9 @@ def draw_matplotlib(x_r, y_r):
 if __name__ == "__main__":
     args = parse_args()
     if args.x is not None and args.y is not None:
-        print(f"Manual coordinates provided. Evaluating router at ({args.x}, {args.y})...")
-        draw_field_at_position(args.x, args.y, use_gui=args.GUI)
+        print(f"Evaluating router at ({args.x}, {args.y})...")
+        draw_field_at_position(args.x, args.y, use_gui=args.GUI, use_raw=args.raw)
     elif args.x is not None or args.y is not None:
-        print("Error: You must provide BOTH --x and --y coordinates to run a specific evaluation.")
+        print("Error: Provide BOTH --x and --y coordinates.")
     else:
-        optimize_router(use_gui=args.GUI)
+        optimize_router(use_gui=args.GUI, use_raw=args.raw)
