@@ -1,8 +1,7 @@
 import numpy as np
 from numba import njit
-import matplotlib.pyplot as plt
 
-# D2Q9 lattice parameters defined at module level for JIT compatibility
+# D2Q9 lattice parameters 
 C = np.array([[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]])
 W = np.array([4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36])
 OPP = np.array([0, 3, 4, 1, 2, 7, 8, 5, 6])
@@ -10,6 +9,7 @@ OPP = np.array([0, 3, 4, 1, 2, 7, 8, 5, 6])
 @njit
 def compute_macroscopic(f):
     Nx, Ny, _ = f.shape
+    rho_eps = 1e-14
     rho = np.zeros((Nx, Ny))
     ux = np.zeros((Nx, Ny))
     uy = np.zeros((Nx, Ny))
@@ -19,8 +19,13 @@ def compute_macroscopic(f):
                 rho[i, j] += f[i, j, k]
                 ux[i, j] += f[i, j, k] * C[k, 0]
                 uy[i, j] += f[i, j, k] * C[k, 1]
-            ux[i, j] /= rho[i, j]
-            uy[i, j] /= rho[i, j]
+            if np.isfinite(rho[i, j]) and rho[i, j] > rho_eps:
+                ux[i, j] /= rho[i, j]
+                uy[i, j] /= rho[i, j]
+            else:
+                rho[i, j] = 1.0
+                ux[i, j] = 0.0
+                uy[i, j] = 0.0
     return rho, ux, uy
 
 @njit
@@ -38,47 +43,67 @@ def equilibrium(rho, ux, uy):
 @njit
 def lbm_step(f, obstacle, tau, U_inlet):
     Nx, Ny, _ = f.shape
-    
-    # 1. Macroscopic variables
+
     rho, ux, uy = compute_macroscopic(f)
-    
-    # 2. Collision
+
     feq = equilibrium(rho, ux, uy)
     f_out = f - (f - feq) / tau
-    
-    # 3. Bounce-back boundaries
+
     for i in range(Nx):
         for j in range(Ny):
             if obstacle[i, j]:
                 for k in range(9):
                     f_out[i, j, k] = f[i, j, OPP[k]]
 
-    # 4. Streaming
     f_new = np.zeros_like(f)
     for i in range(Nx):
         for j in range(Ny):
             for k in range(9):
-                next_i = (i + C[k, 0]) % Nx
+                next_i = i + C[k, 0]
                 next_j = (j + C[k, 1]) % Ny
-                f_new[next_i, next_j, k] = f_out[i, j, k]
-                
+                if 0 <= next_i < Nx:
+                    f_new[next_i, next_j, k] = f_out[i, j, k]
+
     f = f_new
 
-    # 5. Outflow boundary condition (Right wall)
-    for j in range(Ny):
-        for k in range(9):
-            f[Nx-1, j, k] = f[Nx-2, j, k]
-
-    # 6. Inflow boundary condition (Left wall, Zou/He)
+    # Zou-He velocity inlet (left boundary): ux = U_inlet, uy = 0
     for j in range(Ny):
         rho_in = (
             f[0, j, 0] + f[0, j, 2] + f[0, j, 4] + 
             2.0 * (f[0, j, 3] + f[0, j, 6] + f[0, j, 7])
         ) / (1.0 - U_inlet)
-        
+
         f[0, j, 1] = f[0, j, 3] + (2.0/3.0) * rho_in * U_inlet
         f[0, j, 5] = f[0, j, 7] - 0.5 * (f[0, j, 2] - f[0, j, 4]) + (1.0/6.0) * rho_in * U_inlet
         f[0, j, 8] = f[0, j, 6] + 0.5 * (f[0, j, 2] - f[0, j, 4]) + (1.0/6.0) * rho_in * U_inlet
+
+    # Zou-He velocity outlet (right boundary): ux extrapolated, uy = 0
+    for j in range(Ny):
+        ux_out = ux[Nx - 2, j]
+        if ux_out > 0.25:
+            ux_out = 0.25
+        elif ux_out < -0.25:
+            ux_out = -0.25
+
+        denom = 1.0 + ux_out
+        if denom < 1e-8:
+            denom = 1e-8
+
+        rho_out = (
+            f[Nx - 1, j, 0] + f[Nx - 1, j, 2] + f[Nx - 1, j, 4]
+            + 2.0 * (f[Nx - 1, j, 1] + f[Nx - 1, j, 5] + f[Nx - 1, j, 8])
+        ) / denom
+
+        f[Nx - 1, j, 3] = f[Nx - 1, j, 1] - (2.0 / 3.0) * rho_out * ux_out
+        f[Nx - 1, j, 6] = f[Nx - 1, j, 8] + 0.5 * (f[Nx - 1, j, 4] - f[Nx - 1, j, 2]) - (1.0 / 6.0) * rho_out * ux_out
+        f[Nx - 1, j, 7] = f[Nx - 1, j, 5] + 0.5 * (f[Nx - 1, j, 2] - f[Nx - 1, j, 4]) - (1.0 / 6.0) * rho_out * ux_out
+
+    rho, ux, uy = compute_macroscopic(f)
+    for i in range(Nx):
+        for j in range(Ny):
+            if obstacle[i, j]:
+                ux[i, j] = 0.0
+                uy[i, j] = 0.0
 
     return f, rho, ux, uy
 
