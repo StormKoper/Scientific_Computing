@@ -56,12 +56,117 @@ def estimate_strouhal_from_probe(signal, sample_every, D, U, st_min=0.05, st_max
     return St
 
 
-def run_validation_sweep():
-    target_res = [10, 15, 20, 25, 30]
+def _state_is_stable(solver, rho_bounds=(0.2, 5.0), u_abs_max=1.0):
+    """Return True if macroscopic fields are finite and within conservative bounds."""
+    rho = solver.rho
+    ux = solver.ux
+    uy = solver.uy
+
+    if not np.isfinite(rho).all() or not np.isfinite(ux).all() or not np.isfinite(uy).all():
+        return False
+
+    rho_min = np.min(rho)
+    rho_max = np.max(rho)
+    if rho_min <= rho_bounds[0] or rho_max >= rho_bounds[1]:
+        return False
+
+    u_abs = np.sqrt(ux * ux + uy * uy)
+    if np.max(u_abs) > u_abs_max:
+        return False
+
+    return True
+
+
+def find_max_stable_reynolds(
+    Nx=300,
+    Ny=120,
+    U_inlet=0.12,
+    re_values=None,
+    scan_steps=2500,
+    check_every=100,
+):
+    """
+    Scan Reynolds numbers and return the highest stable tested value.
+
+    Stability means: finite macroscopic fields and conservative rho/|u| bounds.
+    The scan stops at the first unstable case and returns the previous stable Re.
+    """
+    if re_values is None:
+        re_values = [10, 20, 30, 40, 50, 60, 80, 100, 120, 140, 160, 180, 200]
+
+    stable_results = []
+    max_stable_re = np.nan
+
+    for re in re_values:
+        solver = LBA(Nx=Nx, Ny=Ny, U_inlet=U_inlet, Re=float(re))
+        stable = True
+
+        for step in range(1, scan_steps + 1):
+            solver.step()
+
+            if step % check_every == 0:
+                if not _state_is_stable(solver):
+                    stable = False
+                    break
+
+        stable_results.append((float(re), stable))
+        if stable:
+            max_stable_re = float(re)
+        else:
+            break
+
+    return max_stable_re, stable_results
+
+def _choose_reynolds_targets(max_stable_re, min_re=10, n_points=6, safety_factor=0.9, min_margin=5):
+    """Choose integer Reynolds targets with headroom below the detected stability limit."""
+    if not np.isfinite(max_stable_re):
+        return [min_re]
+
+    effective_max = float(max_stable_re)
+    if effective_max - min_re > 2.0 * min_margin:
+        effective_max = min(effective_max * safety_factor, effective_max - min_margin)
+
+    max_re_int = int(np.floor(effective_max))
+    if max_re_int <= min_re:
+        return [min_re]
+
+    if n_points <= 2:
+        return [min_re, max_re_int]
+
+    grid = np.linspace(min_re, max_re_int, n_points)
+    targets = np.unique(np.rint(grid).astype(int)).tolist()
+    if targets[-1] != max_re_int:
+        targets[-1] = max_re_int
+    return targets
+
+def run_validation_sweep(target_res=None, auto_select_re=True):
 
     # Keep geometry/velocity fixed across Re sweep
     Nx, Ny = 300, 120
     U_inlet = 0.12
+
+    if target_res is None:
+        if auto_select_re:
+            re_candidates = [10, 20, 30, 40, 50, 60, 80, 100, 120, 140, 160, 180, 200]
+            max_re, re_scan = find_max_stable_reynolds(
+                Nx=Nx,
+                Ny=Ny,
+                U_inlet=U_inlet,
+                re_values=re_candidates,
+                scan_steps=2500,
+                check_every=100,
+            )
+
+            print("Re stability scan:")
+            for re, stable in re_scan:
+                status = "stable" if stable else "unstable"
+                print(f"  Re={int(re):3d}: {status}")
+
+            target_res = _choose_reynolds_targets(max_re, min_re=10, n_points=6)
+            print(f"Detected max stable Re (short scan): {max_re}")
+            print(f"Using Reynolds targets for sweep: {target_res}")
+        else:
+            target_res = [10, 15, 20, 25, 30]
 
     re_list, div_list, st_list = [], [], []
 

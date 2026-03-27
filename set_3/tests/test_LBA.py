@@ -1,6 +1,7 @@
 import numpy as np
 
 from set_3.utils.LBA import LBA, compute_macroscopic, equilibrium
+from set_3.scripts.run_LBA import find_max_stable_reynolds, _choose_reynolds_targets
 
 
 def test_equilibrium_recovers_macroscopic_fields():
@@ -61,3 +62,31 @@ def test_high_re_short_run_no_nan_inf():
     assert np.isfinite(solver.rho).all()
     assert np.isfinite(solver.ux).all()
     assert np.isfinite(solver.uy).all()
+
+def test_find_max_stable_reynolds_returns_valid_scan():
+    max_re, results = find_max_stable_reynolds(
+        Nx=80,
+        Ny=40,
+        U_inlet=0.10,
+        re_values=[10, 20, 30],
+        scan_steps=200,
+        check_every=50,
+    )
+
+    assert len(results) >= 1
+    assert all(len(item) == 2 for item in results)
+    assert np.isfinite(max_re)
+    assert max_re >= 10
+
+
+def test_choose_reynolds_targets_is_sorted_and_bounded():
+    targets = _choose_reynolds_targets(68, min_re=10, n_points=6)
+
+    assert targets[0] == 10
+    assert targets[-1] < 68
+    assert all(targets[i] < targets[i + 1] for i in range(len(targets) - 1))
+
+
+def test_choose_reynolds_targets_handles_invalid_max():
+    targets = _choose_reynolds_targets(np.nan, min_re=10, n_points=6)
+    assert targets == [10]
