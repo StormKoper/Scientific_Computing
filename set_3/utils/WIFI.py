@@ -1,5 +1,6 @@
 import argparse
 import time
+from pathlib import Path
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -11,6 +12,8 @@ from scipy.optimize import differential_evolution
 
 from ..utils.config import *  # noqa: F403
 
+FDIR = Path(__file__).parent.parent / "figures"
+Path.mkdir(FDIR, exist_ok=True)
 
 def parse_args() -> argparse.Namespace:
     """Parse the arguments
@@ -43,6 +46,12 @@ def parse_args() -> argparse.Namespace:
         "--raw",
         help="Use raw signal values and enforce a 0.5m distance from targets",
         action="store_true"
+    )
+    parser.add_argument(
+        "--analysis",
+        help="Run analysis with N optimizations and plot the results",
+        type=int,
+        default=0
     )
     return parser.parse_args()
 
@@ -170,10 +179,10 @@ masks = [IfPos(r_meas**2 - ((x - xt)**2 + (y - yt)**2), 1, 0) for (xt, yt) in ta
 # 5. SIGNAL EVALUATION 
 # ============================================================================
 
-def evaluate_router_position(x_r, y_r, use_raw=False):
+def evaluate_router_position(x_r, y_r):
     """
     Evaluates the wave field for a given router position and computes the 
-    average signal strength (in relative dB or raw) at predefined target locations.
+    average signal strength in both raw and relative dB at predefined target locations.
     """
     # source is given by the Gaussian pulse, here sigma denotes the std
     # of the gaussian pulse, thus at 1sigma, the amplitude has dropped by
@@ -191,22 +200,23 @@ def evaluate_router_position(x_r, y_r, use_raw=False):
     # magnitude of signal (modulus)
     mod_u = sqrt(gfu.real**2 + gfu.imag**2)
     
-    scores = []
+    raw_scores = []
+    db_scores = []
     for m in masks:
         # calculate the average value inside probe point radius
         linear_avg = Integrate(mod_u * m, mesh) / meas_area
         
-        if use_raw:
-            scores.append(linear_avg)
-        else:
-            # convert to relative db
-            db_val = 20 * np.log10((linear_avg + 1e-12) / A)
-            scores.append(db_val)
+        raw_scores.append(linear_avg)
+        
+        # convert to relative db
+        db_val = 20 * np.log10((linear_avg + 1e-12) / A)
+        db_scores.append(db_val)
         
     # sum the relative dbs or raw values to get a final score
-    total_signal = sum(scores)
+    total_raw = sum(raw_scores)
+    total_db = sum(db_scores)
 
-    return total_signal
+    return total_raw, total_db
 
 # ============================================================================
 # 6. OPTIMIZATION FOR BEST ROUTER PLACEMENT
@@ -246,14 +256,15 @@ def objective(pos, use_raw=False):
     # in wall check and penalty
     if is_inside_wall(x_r, y_r, buffer=0.05):
         return float('inf')
-        
+    
+    # penalty for being within 0.5 meters of target
     if is_close_to_target(x_r, y_r):
         return float('inf')
 
-    sig = evaluate_router_position(x_r, y_r, use_raw=use_raw)
-    return -sig
+    total_raw, total_db = evaluate_router_position(x_r, y_r)
+    return -total_raw if use_raw else -total_db
 
-def optimize_router(use_gui=False, use_raw=False):
+def optimize_router(use_gui=False, use_raw=False, draw=True, seed=None):
     print("Starting optimization using Differential Evolution (global search)...")
     start_time = time.time()
     
@@ -272,7 +283,8 @@ def optimize_router(use_gui=False, use_raw=False):
         maxiter=30,          
         tol=0.01,            
         disp=True,
-        workers=1            
+        workers=1,
+        seed=seed
     )
     print("Optimization finished.")
     
@@ -285,32 +297,119 @@ def optimize_router(use_gui=False, use_raw=False):
     print(f"Evaluations  : {result.nfev}")
     print(f"Best Position: X = {result.x[0]:.2f} m, Y = {result.x[1]:.2f} m")
     
+    total_raw, total_db = evaluate_router_position(result.x[0], result.x[1])
+    
     unit = "raw" if use_raw else "dB"
-    print(f"Best Signal  : {-result.fun:.2f} {unit}")
+    best_sig = total_raw if use_raw else total_db
+    print(f"Best Signal  : {best_sig:.2f} {unit}")
     print("="*50)
     
-    print("Evaluating best position for visualization...")
-    draw_field_at_position(result.x[0], result.x[1], use_gui=use_gui, use_raw=use_raw)
+    if draw:
+        print("Evaluating best position for visualization...")
+        draw_field_at_position(result.x[0], result.x[1], use_gui=use_gui, use_raw=use_raw)
     
-    return result.x
+    return result.x[0], result.x[1], total_raw
 
-def draw_field_at_position(x_r, y_r, use_gui=False, use_raw=False):
+def run_analysis(n, use_raw):
+    """Run multiple differential optimizations and plot a scatterplot of solutions
+    in floorplan, as well as a wave map of best solution."""
+    print(f"Running {n} optimizations for analysis...")
+    results = []
+    base_seed = 42
+    for i in range(n):
+        print(f"\nOptimization run {i+1}/{n} (Seed: {base_seed + i})")
+        x, y, score = optimize_router(use_gui=False, use_raw=use_raw, draw=False, seed=base_seed + i)
+        results.append((x, y, score))
+    
+    metric_str = "raw" if use_raw else "db"
+    scatter_save_name = f"analysis_scatter_{n}_{metric_str}.png"
+    draw_analysis_scatter(results, use_raw=use_raw, save_name=scatter_save_name)
+    
+    scores = [res[2] for res in results]
+    best_idx = np.argmax(scores)
+    best_x, best_y, best_score = results[best_idx]
+    
+    print(f"\nEvaluating absolute best position from analysis (Run {best_idx+1}): X = {best_x:.2f}, Y = {best_y:.2f}")
+    wave_save_name = f"wave_map_best_{metric_str}.png"
+    draw_field_at_position(best_x, best_y, use_gui=False, use_raw=use_raw, save_name=wave_save_name)
+
+def draw_field_at_position(x_r, y_r, use_gui=False, use_raw=False, save_name=None):
     """ Evaluate and visualize the field for a given router position. """
-    total_signal = evaluate_router_position(x_r, y_r, use_raw=use_raw)
+    total_raw, total_db = evaluate_router_position(x_r, y_r)
+    total_signal = total_raw if use_raw else total_db
     unit = "raw" if use_raw else "dB"
     print(f"Total Signal  : {total_signal:.2f} {unit}")
     if use_gui:
         open_GUI(x_r, y_r)
         input("Press Enter to close visualization and exit...")
     else:
-        draw_matplotlib(x_r, y_r)
+        draw_matplotlib(x_r, y_r, save_name=save_name)
 
 # ============================================================================
-# VISUALIZATION: EITHER GUI OR MATPLOTLIB
+# VISUALIZATION: GUI OR MATPLOTLIB FIGURES
 # ============================================================================
+
+def draw_analysis_scatter(results, use_raw=False, save_name=None):
+    """Make a figure of the floorplan with best found solutions"""
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # layer the walls on top using Matplotlib Rectangles
+    wall_patches = [
+        mpatches.Rectangle((0.0, 3.0), 3.0, 0.15, facecolor='black'),    # Kitchen top
+        mpatches.Rectangle((2.5, 0.0), 0.15, 2.0, facecolor='black'),    # Kitchen right
+        mpatches.Rectangle((4.0, 3.0), 2.15, 0.15, facecolor='black'),   # Hall horiz
+        mpatches.Rectangle((6.0, 3.15), 0.15, 4.85, facecolor='black'),  # Living vert
+        mpatches.Rectangle((7.15, 3.0), 2.85, 0.15, facecolor='black'),  # Bath top
+        mpatches.Rectangle((7.0, 0.0), 0.15, 1.5, facecolor='black'),    # Bath left bottom
+        mpatches.Rectangle((7.0, 2.5), 0.15, 0.65, facecolor='black')    # Bath left top
+    ]
+    
+    for wall in wall_patches:
+        ax.add_patch(wall)
+
+    for i, (px, py) in enumerate(targets):
+        if i == 0:
+            ax.plot(px, py, marker="P", color='darkviolet', markersize=8, alpha=0.8, linestyle='none', label='Targets', zorder=11)
+        else:
+            ax.plot(px, py, marker="P", color='darkviolet', markersize=8, alpha=0.8, linestyle='none', zorder=11)
+
+    xs = [res[0] for res in results]
+    ys = [res[1] for res in results]
+    scores = [res[2] for res in results]
+    
+    # make sure better scores are on top of worse scores
+    sorted_indices = np.argsort(scores)
+    xs = np.array(xs)[sorted_indices]
+    ys = np.array(ys)[sorted_indices]
+    scores = np.array(scores)[sorted_indices]
+    
+    min_score = min(scores)
+    max_score = max(scores)
+
+    # normally optimized points
+    scatter = ax.scatter(xs, ys, c=scores, cmap='plasma', marker="h", s=100, 
+                         edgecolors='black', alpha=0.9, zorder=12, vmin=min_score, vmax=max_score,
+                         label='Optimized Routers')
+
+    ax.set_aspect('equal')
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 8)
+    ax.set_xlabel("X (meters)")
+    ax.set_ylabel("Y (meters)")
+    title_suffix = "Raw Optimization" if use_raw else "dB Optimization"
+    ax.set_title(f"WiFi Router Placement Analysis (N={len(results)})\n{title_suffix}")
+    ax.legend(loc='upper left', framealpha=0.9, shadow=True, fancybox=True)
+    
+    # colorbar for spread
+    cb = fig.colorbar(scatter, ax=ax, label="Total Signal Strength (raw)")
+    
+    if save_name:
+        plt.savefig(FDIR / save_name, bbox_inches='tight', dpi=300)
+    
+    plt.show()
 
 def compute_db_field(x_r, y_r):
-    """Computes the thresholded magnitude of the field in dB and maps it to a GridFunction."""
+    """Compute the thresholded magnitude of the field in dB and maps it to a GridFunction."""
     print("Processing data for visualization...")
     
     # use the true complex magnitude (Time-averaged power envelope)
@@ -349,7 +448,7 @@ def open_GUI(x_r, y_r):
     db_gf, min_val, max_val = compute_db_field(x_r, y_r)
     Draw(db_gf, mesh, "Signal_Strength_dB", min=min_val, max=max_val)
 
-def draw_matplotlib(x_r, y_r):
+def draw_matplotlib(x_r, y_r, save_name=None):
     db_gf, min_val, max_val = compute_db_field(x_r, y_r)
 
     print("Extracting data for Matplotlib rendering...")
@@ -390,7 +489,7 @@ def draw_matplotlib(x_r, y_r):
 
     # plot marker for router
     ax.plot(x_r, y_r, marker="h", color='gray', markersize=15, 
-            markeredgecolor='black', alpha=0.9, linestyle='none', label=f'Router {x_r, y_r}')
+            markeredgecolor='black', alpha=0.9, linestyle='none', label=f'Router ({x_r:.2f}, {y_r:.2f})')
 
     for i, (px, py) in enumerate(targets):
         # tiny crosshair
@@ -410,11 +509,16 @@ def draw_matplotlib(x_r, y_r):
     
     fig.colorbar(heatmap, label="Signal Strength (dB)")
     
+    if save_name:
+        plt.savefig(FDIR / save_name, bbox_inches='tight', dpi=300)
+    
     plt.show()
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.x is not None and args.y is not None:
+    if args.analysis > 0:
+        run_analysis(args.analysis, use_raw=args.raw)
+    elif args.x is not None and args.y is not None:
         print(f"Evaluating router at ({args.x}, {args.y})...")
         draw_field_at_position(args.x, args.y, use_gui=args.GUI, use_raw=args.raw)
     elif args.x is not None or args.y is not None:
