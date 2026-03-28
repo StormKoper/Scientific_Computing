@@ -12,52 +12,60 @@ def run_validation_sweep():
     D = 0.1
     U = 1.0
     
-    re_list = []
-    div_list = []
-    st_list = []
+    re_arr = np.zeros(len(target_res))
+    div_arr = np.zeros(len(target_res))
+    st_arr = np.zeros(len(target_res))
     
-    for Re in target_res:
+    for i, Re in enumerate(target_res):
         print(f"Running simulation for Re = {Re}")
         start_time = time.time()
         nu = U * D / Re
         ns = FE(tau=0.0005, nu=nu, maxh=0.03)
-        ns.run(t_end=8, sample_freq=200) 
+        ns.run(t_end=10, sample_freq=200) 
         
         div_norm = ns.calc_divergence_norm()
         St = ns.get_strouhal_number(D, U)
         
-        re_list.append(Re)
-        div_list.append(div_norm)
-        st_list.append(St)
+        re_arr[i] = Re
+        div_arr[i] = div_norm
+        st_arr[i] = St
         end_time = time.time()
         print(f"    Re: {Re}, L2-Div: {div_norm:.2e}, St: {St:.3f}, Time: {end_time - start_time:.2f}s")
 
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
+    invalid_idcs = np.isnan(div_arr)
+
     # Subplot 1: divergence
-    axes[0].plot(re_list, div_list, marker='o', linestyle='-', color='tab:blue')
-    axes[0].set_yscale('log')
-    axes[0].set_title("Divergence vs. Reynolds Number")
-    axes[0].set_xlabel("Reynolds Number (Re)")
-    axes[0].set_ylabel("L2-Norm of Divergence")
+    axes[0].plot(re_arr[~invalid_idcs], div_arr[~invalid_idcs], marker='o', linestyle='-', color='darkcyan', 
+                 label="Stable Runs")
     
     # Subplot 2: physical accuracy
-    axes[1].scatter(re_list, st_list, facecolors='none', edgecolors='tab:red', 
+    axes[1].scatter(re_arr[~invalid_idcs], st_arr[~invalid_idcs], facecolors='none', edgecolors='firebrick', 
                 linewidths=2, s=80, label='Simulated (Parabolic Inlet)', zorder=10)
     
+    # markers for diverged runs
+    if sum(invalid_idcs) > 0:
+        axes[0].scatter(re_arr[invalid_idcs], np.min(div_arr[~invalid_idcs]), marker="x", color="tab:gray", label="Diverged")
+        axes[1].scatter(re_arr[invalid_idcs], 0, marker="x", color="tab:gray", label="Diverged")
+
     # Add the Schäfer-Turek Benchmark Point
     axes[1].scatter([100], [0.300], marker='*', s=200, color='gold', edgecolor='black', 
                 label='DFG 2D-2 Benchmark', zorder=5)
     
+    axes[0].set_yscale('log')
+    axes[0].set_title("Divergence vs. Reynolds Number")
+    axes[0].set_xlabel("Reynolds Number (Re)")
+    axes[0].set_ylabel("L2-Norm of Divergence")
+    axes[0].legend(fancybox=True, shadow=True, loc='upper left')
+
     axes[1].set_title("Strouhal Number Validation")
     axes[1].set_xlabel("Reynolds Number (Re)")
     axes[1].set_ylabel("Strouhal Number (St)")
     axes[1].legend(fancybox=True, shadow=True)
-    
-    axes[1].set_title("Physical Accuracy: Strouhal Number Validation")
-    axes[1].set_xlabel("Reynolds Number (Re)")
-    axes[1].set_ylabel("Strouhal Number (St)")
-    axes[1].legend(fancybox=True, shadow=True)
+
+    plt.suptitle("Divergence and Strouhal Number for FE implementation")
     
     plt.tight_layout()
     plt.show()

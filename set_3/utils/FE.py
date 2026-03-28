@@ -132,10 +132,15 @@ class FE:
         self.vel_hist = GridFunction(self.V, multidim=0)
         self.vel_hist.AddMultiDimComponent(self.x.components[0].vec)  # initial frame
 
-        # probe point for vortex shedding
-        self.probe_point = self.mesh(0.4, 0.25)
+        # probe points for vortex shedding
+        self.probe_points = [
+            self.mesh(0.45, 0.255),
+            self.mesh(0.45, 0.175),
+            self.mesh(0.55, 0.255),
+            self.mesh(0.55, 0.175)
+        ]
         self.t_hist = []
-        self.vy_hist = []
+        self.vy_hist = [[] for _ in range(4)]
 
         with TaskManager():  # Handle parallelization
             while t < t_end:
@@ -155,7 +160,8 @@ class FE:
 
                 # save data for probe point
                 self.t_hist.append(t)
-                self.vy_hist.append(self.x.components[0](self.probe_point)[1])
+                for j, p in enumerate(self.probe_points):
+                    self.vy_hist[j].append(self.x.components[0](p)[1])
 
                 # store frame every sample_every steps
                 if (i % sample_freq == 0) or (t >= t_end):
@@ -197,25 +203,29 @@ class FE:
         steady_start_idx = int(5.0 / self.tau)
         
         # failsafe if the simulation crashed early
-        if len(self.vy_hist) <= steady_start_idx:
+        if len(self.vy_hist[0]) <= steady_start_idx:
             return 0.0 
             
-        # Slice the array to only look at steady shedding
-        vy = np.array(self.vy_hist)[steady_start_idx:]
+        st_values = []
+        for hist in self.vy_hist:
+            # slice the array to only look at steady shedding
+            vy = np.array(hist)[steady_start_idx:]
 
-        # center signal at 0, otherwise fft will find
-        # 0hz as max signal
-        vy = vy - np.mean(vy)
+            # center signal at 0, otherwise fft will find
+            # 0hz as max signal
+            vy = vy - np.mean(vy)
+            
+            n = len(vy)
+            freqs = np.fft.rfftfreq(n, d=self.tau)
+            fft_values = np.abs(np.fft.rfft(vy))
+            
+            peak_idx = np.argmax(fft_values)
+            f = freqs[peak_idx]
+            
+            St = f * D / U
+            st_values.append(St)
         
-        n = len(vy)
-        freqs = np.fft.rfftfreq(n, d=self.tau)
-        fft_values = np.abs(np.fft.rfft(vy))
-        
-        peak_idx = np.argmax(fft_values)
-        f = freqs[peak_idx]
-        
-        St = f * D / U
-        return St
+        return sum(st_values) / len(st_values)
 
 if __name__ == "__main__":
     NS = FE()
