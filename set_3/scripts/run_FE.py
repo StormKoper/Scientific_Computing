@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,6 +7,8 @@ import numpy as np
 from ..utils.config import *  # noqa: F403
 from ..utils.FE import FE
 
+FDIR = Path(__file__).parent.parent / "figures"
+Path.mkdir(FDIR, exist_ok=True)
 
 def run_validation_sweep():
     target_res = [10, 20, 50, 100, 150, 200]
@@ -30,10 +33,10 @@ def run_validation_sweep():
         div_arr[i] = div_norm
         st_arr[i] = St
         end_time = time.time()
-        print(f"    Re: {Re}, L2-Div: {div_norm:.2e}, St: {St:.3f}, Time: {end_time - start_time:.2f}s")
+        print(f"    Re: {Re}, L_inf-Div: {div_norm:.2e}, St: {St:.3f}, Time: {end_time - start_time:.2f}s")
 
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
     
     invalid_idcs = np.isnan(div_arr)
 
@@ -57,7 +60,7 @@ def run_validation_sweep():
     axes[0].set_yscale('log')
     axes[0].set_title("Divergence vs. Reynolds Number")
     axes[0].set_xlabel("Reynolds Number (Re)")
-    axes[0].set_ylabel("L2-Norm of Divergence")
+    axes[0].set_ylabel("$L_{\\infty}$-Norm of Divergence")
     axes[0].legend(fancybox=True, shadow=True, loc='upper left')
 
     axes[1].set_title("Strouhal Number Validation")
@@ -67,7 +70,7 @@ def run_validation_sweep():
 
     plt.suptitle("Divergence and Strouhal Number for FE implementation")
     
-    plt.tight_layout()
+    plt.savefig(FDIR / "challenge_A_FE.png", bbox_inches='tight', dpi=300)
     plt.show()
 
 if __name__ == "__main__":

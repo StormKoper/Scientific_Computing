@@ -9,6 +9,7 @@ import numpy as np
 from netgen.occ import Glue, MoveTo, OCCGeometry, Rectangle
 from ngsolve import *
 from scipy.optimize import differential_evolution
+from tqdm import tqdm
 
 from ..utils.config import *  # noqa: F403
 
@@ -255,11 +256,11 @@ def objective(pos, use_raw=False):
 
     # in wall check and penalty
     if is_inside_wall(x_r, y_r, buffer=0.05):
-        return float('inf')
+        return 1000 #high penalty term
     
     # penalty for being within 0.5 meters of target
     if is_close_to_target(x_r, y_r):
-        return float('inf')
+        return 1000 #high penalty term
 
     total_raw, total_db = evaluate_router_position(x_r, y_r)
     return -total_raw if use_raw else -total_db
@@ -271,21 +272,29 @@ def optimize_router(use_gui=False, use_raw=False, draw=True, seed=None):
     # we restrict possible router positions inside the 10x8 apartment 
     bounds = [(0.5, 9.5), (0.5, 7.5)]
     
+    # setting up a nice tqdm pbar
+    max_iters = 30
+    pbar = tqdm(total=max_iters, desc="Optimizing Router", unit="iter")
+    def update_pbar(*args, **kwargs):
+        pbar.update(1)
+
     # differential_evolution to avoid local minima
     result = differential_evolution(
         objective,
         args=(use_raw,),
         bounds=bounds,
         strategy='best1bin', 
-        popsize=10,          
+        popsize=20,          
         mutation=(0.5, 1.0), 
         recombination=0.7,
-        maxiter=30,          
+        maxiter=max_iters,          
         tol=0.01,            
-        disp=True,
         workers=1,
+        callback=update_pbar,
         seed=seed
     )
+
+    pbar.close()
     print("Optimization finished.")
     
     elapsed = time.time() - start_time
@@ -330,7 +339,7 @@ def run_analysis(n, use_raw):
     best_x, best_y, best_score = results[best_idx]
     
     print(f"\nEvaluating absolute best position from analysis (Run {best_idx+1}): X = {best_x:.2f}, Y = {best_y:.2f}")
-    wave_save_name = f"wave_map_best_{metric_str}.png"
+    wave_save_name = f"wave_map_best_{n}_{metric_str}.png"
     draw_field_at_position(best_x, best_y, use_gui=False, use_raw=use_raw, save_name=wave_save_name)
 
 def draw_field_at_position(x_r, y_r, use_gui=False, use_raw=False, save_name=None):

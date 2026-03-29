@@ -196,7 +196,15 @@ class FE:
         return (1.0 * 2 * 0.05) / self.nu
 
     def calc_divergence_norm(self):
-        return sqrt(Integrate(div(self.x.components[0])**2, self.mesh))
+        # a discrete space to hold the divergence values.
+        div_space = L2(self.mesh, order=2)
+        div_gf = GridFunction(div_space)
+        
+        # projection of the continuous divergence expression into this discrete grid
+        div_gf.Set(div(self.x.components[0]))
+        
+        # find the maximum absolute value (L-infinity norm)
+        return np.max(np.abs(div_gf.vec.FV().NumPy()))
 
     def get_strouhal_number(self, D=0.1, U=1.0):
         # ignore startup transient. Only sample after t=5.
