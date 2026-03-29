@@ -4,16 +4,17 @@ from scipy.signal import convolve2d
 from tqdm import tqdm
 from warnings import warn
 
+FASTMATH = True
+
 class FD:
     def __init__(self, dx: float = .01, dy: float = .01, dt: float = .001,
-                 rho: float = 1.0, nu: float = .1, omega: float = 1.5, u0: float = 0.0):
+                 rho: float = 1.0, nu: float = .1):
         # initialize parameters
         self.dx = dx
         self.dy = dy
         self.dt = dt
         self.rho = rho
         self.nu = nu
-        self.omega = omega
         pad = 2 # extra padding for boundary conditions
         # initialize velocity and pressure fields with extra padding for boundary conditions
         self.nx = round(2.2 // dx + 2*pad) + 1
@@ -21,10 +22,15 @@ class FD:
         self.u = np.zeros(shape=(self.nx, self.ny))
         self.v = np.zeros_like(self.u)
         self.p = np.zeros_like(self.u)
-        self.u[:pad, :] = 1.0 # inflow from the left
-        # set up the cylinder
+        # set up the inflow and cylinder
         x_coords = np.pad(np.linspace(0, 2.2, self.nx-2*pad), (pad, pad), mode='edge')
         y_coords = np.pad(np.linspace(0, 0.41, self.ny-2*pad), (pad, pad), mode='edge')
+        # parabolic inflow from the left (in line with DFG 2D-2 Benchmark)
+        Um = 1.5
+        H = 0.41
+        uin_x = 4 * Um * y_coords * (H - y_coords) / (H**2)
+        self.u[:pad, :] = uin_x[None, :]
+        # cylinder mask for no-slip condition
         X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
         cx, cy, r = 0.2, 0.2, 0.05
         self.mask = (X - cx)**2 + (Y - cy)**2 <= r**2
@@ -45,121 +51,59 @@ class FD:
             [1, 0, 1],
             [0, 0, 0]
         ])
-        self.x_neighbors = convolve2d(~self.mask, x_kernel, mode='same', boundary='fill', fillvalue=0)
-        self.y_neighbors = convolve2d(~self.mask, y_kernel, mode='same', boundary='fill', fillvalue=0)
+        x_neighbors = convolve2d(~self.mask, x_kernel, mode='same', boundary='fill', fillvalue=0)
+        y_neighbors = convolve2d(~self.mask, y_kernel, mode='same', boundary='fill', fillvalue=0)
+        self.A_diag = x_neighbors * self.dy**2 + y_neighbors * self.dx**2
+        self.inv_A_diag = np.divide(1.0, self.A_diag, out=np.zeros_like(self.A_diag), where=~self.mask)
         # calculate Reynolds number for reference
-        self.Re = 1.0 * 2 * r / nu
+        self.Re = 1.0 * 2 * r / nu # Re = U*L/nu with L=diameter=2r and U=2/3 Um = 1.0
         print(f"Initialized FD solver with Re={self.Re:.2f}, grid size=({self.nx-2*pad}, {self.ny-2*pad}), dt={self.dt:.4f}")
         # set up probes for calculating Strouhal number
         self.probes_x = [int((cx+5*r)/dx)+pad,   int((cx+5*r)/dx)+pad,   int((cx+7*r)/dx)+pad,   int((cx+7*r)/dx)+pad]
         self.probes_y = [int((cy+0.5*r)/dy)+pad, int((cy-0.5*r)/dy)+pad, int((cy+0.5*r)/dy)+pad, int((cy-0.5*r)/dy)+pad]
         self.strouhal_data = {"u": [], "v": []}
-        # initialize velocity field as u0
-        self.u[~self.mask] = u0
 
-    def run(self, time: float, P: int = 2, limit_flux: bool = False, p_threshold: float = 1e-4, p_max_iters: int = 5000, probe: int = 0):
-        """Dispatches the run loop according to the time integration and the upwind advection scheme specified by order and convection respectively."""
-        match P:
-            case 2:
-                self._P2(time, limit_flux, p_threshold, p_max_iters, probe)
-            case 3:
-                self._P3(time, limit_flux, p_threshold, p_max_iters, probe)
-            case _:
-                raise ValueError(f"Invalid value for P: {P}. Must be 2 or 3.")
-
-    def _P2(self, time: float, limit_flux: bool, p_threshold: float, p_max_iters: int, probe: int):
-        if limit_flux:
-            predict = self._predict_FL
-        else:
-            predict = self._predict
+    def run(self, time: float, p_threshold: float = 1e-4, p_max_iters: int = 5000, probe: int = 0):
+        # pre-allocate arrays for the solver to avoid repeated allocations inside the loop
         source = np.zeros_like(self.p)
+        Ap = np.zeros_like(self.p)
+        search_dir = np.zeros_like(self.p)
         dp = np.zeros_like(self.p)
         u_next = self.u.copy()
         v_next = self.v.copy()
         du_prev = np.zeros_like(self.u)
         dv_prev = np.zeros_like(self.v)
         n_iters = int(time / self.dt)
-        rho_dx2_dy2_over_dt = (self.rho * self.dx**2 * self.dy**2) / self.dt
-        inv_2dx, inv_2dy = 1 / (2*self.dx), 1 / (2*self.dy)
-        dx2, dy2 = self.dx**2, self.dy**2
-        dt_over_2rho_dx = self.dt / (2 * self.rho * self.dx)
-        dt_over_2rho_dy = self.dt / (2 * self.rho * self.dy)
-        for n in tqdm(range(n_iters), desc="Running simulation", leave=False):
-            # perform prediction step to get intermediate velocity field
-            predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.p, self.mask,
-                    self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy, AB=0.0)
-            self.u, u_next = u_next, self.u
-            self.v, v_next = v_next, self.v
-            # enforce outflow boundary conditions
-            self.u[-2:, :] = self.u[-3, :]
-            self.v[-2:, :] = self.v[-3, :]
-            # compute source term for pressure Poisson equation
-            self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
-            # solve for pressure and correct velocity field
-            dp.fill(0.0) # reset pressure correction array
-            iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                           self.omega, dx2, dy2, p_threshold, p_max_iters)
-            self.p += dp # accumulate pressure corrections for better prediction
-            if iter_count >= p_max_iters:
-                warn(f"Maximum iterations reached for pressure solver: {iter_count}")
-            self._correct(self.u, self.v, dp, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
-            # enforce outflow boundary conditions again after correction
-            self.u[-2:, :] = self.u[-3, :]
-            self.v[-2:, :] = self.v[-3, :]
-            # check CFL condition for stability
-            CFL = (max(np.max(self.u), np.max(self.v)) * self.dt) / min(self.dx, self.dy)
-            if CFL >= 1:
-                warn(f"CFL condition violated: {CFL:.2f} >= 1. Consider reducing dt or increasing dx/dy for stability.")
-            if CFL >= 10:
-                raise RuntimeError(f"CFL condition severely violated: {CFL:.2f} >> 1. Simulation is likely diverging. Consider significantly reducing dt or increasing dx/dy for stability.")
-            if probe and n % probe == 0:
-                self.strouhal_data["u"].extend(self.u[self.probes_x, self.probes_y])
-                self.strouhal_data["v"].extend(self.v[self.probes_x, self.probes_y])
-
-    def _P3(self, time: float, limit_flux: bool, p_threshold: float, p_max_iters: int, probe: int):
-        if limit_flux:
-            predict = self._predict_FL
-        else:
-            predict = self._predict
-        source = np.zeros_like(self.p)
-        p_next = self.p.copy()
-        dp = np.zeros_like(self.p)
-        u_next = self.u.copy()
-        v_next = self.v.copy()
-        du_prev = np.zeros_like(self.u)
-        dv_prev = np.zeros_like(self.v)
-        n_iters = int(time / self.dt)
-        rho_dx2_dy2_over_dt = (self.rho * self.dx**2 * self.dy**2) / self.dt
-        inv_2dx, inv_2dy = 1 / (2*self.dx), 1 / (2*self.dy)
+        # precompute constant coefficients for the source term and pressure solver to optimize performance
+        half_rho_dx2_dy2_over_dt = 0.5 * (self.rho * self.dx**2 * self.dy**2) / self.dt
         dx2, dy2 = self.dx**2, self.dy**2
         dt_over_2rho_dx = self.dt / (2 * self.rho * self.dx)
         dt_over_2rho_dy = self.dt / (2 * self.rho * self.dy)
         # compute initial source
-        self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
+        self._source(source, self.u, self.v, self.mask, half_rho_dx2_dy2_over_dt, self.dx, self.dy)
         # compute initial pressure
-        iter_count, _ = self._pressure(self.p, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                        self.omega, dx2, dy2, p_threshold, p_max_iters)
+        iter_count, _ = self._pressure(self.p, source, self.mask, self.A_diag, self.inv_A_diag,
+                                       Ap, search_dir, dx2, dy2, p_threshold, p_max_iters)
         if iter_count >= p_max_iters:
             warn(f"Maximum iterations reached for pressure solver: {iter_count}")
         # perform prediction step to get intermediate velocity field
-        predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.p, self.mask,
-                self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy, AB=0.0)
+        self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                      self.nu, self.dt, self.dx, self.dy, AB=0.0)
+        self._correct(u_next, v_next, self.p, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
         self.u, u_next = u_next, self.u
         self.v, v_next = v_next, self.v
         # enforce outflow boundary conditions
         self.u[-2:, :] = self.u[-3, :]
         self.v[-2:, :] = self.v[-3, :]
         # compute source term for pressure Poisson equation
-        self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
+        self._source(source, self.u, self.v, self.mask, half_rho_dx2_dy2_over_dt, self.dx, self.dy)
         # solve for pressure and correct velocity field
-        dp.fill(0.0) # reset pressure correction array
-        iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                        self.omega, dx2, dy2, p_threshold, p_max_iters)
+        iter_count, _ = self._pressure(dp, source, self.mask, self.A_diag, self.inv_A_diag,
+                                       Ap, search_dir, dx2, dy2, p_threshold, p_max_iters)
+        self.p += dp # accumulate pressure corrections for better prediction
         if iter_count >= p_max_iters:
             warn(f"Maximum iterations reached for pressure solver: {iter_count}")
         self._correct(self.u, self.v, dp, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
-        p_next = self.p + 2 * dp # extrapolate pressure for better prediction (equivalent to 2 * p_new - 1 * p_old)
-        self.p += dp # accumulate pressure corrections for better prediction
         # enforce outflow boundary conditions again after correction
         self.u[-2:, :] = self.u[-3, :]
         self.v[-2:, :] = self.v[-3, :]
@@ -169,25 +113,29 @@ class FD:
             warn(f"CFL condition violated: {CFL:.2f} >= 1. Consider reducing dt or increasing dx/dy for stability.")
         if CFL >= 10:
             raise RuntimeError(f"CFL condition severely violated: {CFL:.2f} >> 1. Simulation is likely diverging. Consider significantly reducing dt or increasing dx/dy for stability.")
-        for n in tqdm(range(n_iters-1), desc="Running simulation", leave=False):
+        if probe:
+            self.strouhal_data["u"].extend(self.u[self.probes_x, self.probes_y])
+            self.strouhal_data["v"].extend(self.v[self.probes_x, self.probes_y])
+        for n in tqdm(range(1, n_iters), desc="Running simulation", leave=False, total=n_iters, initial=1):
             # perform prediction step to get intermediate velocity field
-            predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, p_next, self.mask,
-                    self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy)
+            self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                          self.nu, self.dt, self.dx, self.dy)
+            self._correct(u_next, v_next, self.p, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
             self.u, u_next = u_next, self.u
             self.v, v_next = v_next, self.v
             # enforce outflow boundary conditions
             self.u[-2:, :] = self.u[-3, :]
             self.v[-2:, :] = self.v[-3, :]
             # compute source term for pressure Poisson equation
-            self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
+            self._source(source, self.u, self.v, self.mask, half_rho_dx2_dy2_over_dt, self.dx, self.dy)
             # solve for pressure and correct velocity field
             dp.fill(0.0) # reset pressure correction array
-            iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                           self.omega, dx2, dy2, p_threshold, p_max_iters)
+            iter_count, _ = self._pressure(dp, source, self.mask, self.A_diag, self.inv_A_diag,
+                                           Ap, search_dir, dx2, dy2, p_threshold, p_max_iters)
+            self.p += dp # accumulate pressure corrections for better prediction
+            if iter_count >= p_max_iters:
+                warn(f"Maximum iterations reached for pressure solver: {iter_count}")
             self._correct(self.u, self.v, dp, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
-            dp += p_next # accumulate pressure corrections for better prediction in next iteration (p_new = p_next + dp) 
-            p_next = 2.0 * dp - self.p # extrapolate pressure for better prediction (equivalent to 2 * p_new - 1 * p_old)
-            self.p[:] = dp # assign the new pressure to be used as the old pressure in the next iteration
             # enforce outflow boundary conditions again after correction
             self.u[-2:, :] = self.u[-3, :]
             self.v[-2:, :] = self.v[-3, :]
@@ -234,12 +182,12 @@ class FD:
             freqs.append(fft_freqs[pos_mask])
             mags.append(np.abs(fft_vals)[pos_mask])
             f_doms.append(freqs[i][np.argmax(mags[i])])
-            strouhals.append(f_doms[i] * 2*0.05 / 1.0) # St = f*L/U with L=diameter=0.1 and U=1.0
+            strouhals.append(f_doms[i] * 2*0.05 / 1.0) # St = f*L/U with L=diameter=0.1 and U=2/3 Um = 1.0
             print(f"{probes[i]} probe")
             print(f"Dominant Shedding Frequency: {f_doms[i]:.2f} Hz")
             print(f"Calculated Strouhal Number:  {strouhals[i]:.4f}")
         fig, ax = plt.subplots(3, 1, figsize=(10, 9), constrained_layout=True)
-        fig.suptitle(f"Strouhal Analysis at Probes (every {probe} steps), $Re={self.Re:.0f}$")
+        fig.suptitle(f"Strouhal Analysis at Probes (every {probe} step{'' if probe == 1 else 's'}), $Re={self.Re:.0f}$")
         # u-component time series
         ax[0].plot(u_data)
         ax[0].set_title("Velocity at Strouhal Probe (u component)")
@@ -270,19 +218,79 @@ class FD:
             plt.show()
 
     @staticmethod
-    @njit(parallel=True, fastmath=False)
+    @njit(parallel=True, fastmath=FASTMATH)
     def _source(source: np.ndarray, u: np.ndarray, v: np.ndarray, mask: np.ndarray,
-                rho_dx2_dy2_over_dt: float, inv_2dx: float, inv_2dy: float):
+                half_rho_dx2_dy2_over_dt: float, dx: float, dy: float):
         """Computes the source term for the pressure Poisson equation based on the velocity field. Does not include the nonlinear advection terms since they are handled in the correction step for P1 and P2."""
         for i in prange(2, source.shape[0]-2):
             for j in range(2, source.shape[1]-2):
                 if mask[i, j]: continue # skip points inside the cylinder and walls
-                source[i, j] = rho_dx2_dy2_over_dt * ((u[i+1, j] - u[i-1, j]) * inv_2dx + (v[i, j+1] - v[i, j-1]) * inv_2dy)
+                source[i, j] = half_rho_dx2_dy2_over_dt * ((u[i+1, j] - u[i-1, j]) / dx + (v[i, j+1] - v[i, j-1]) / dy)
 
     @staticmethod
-    @njit(parallel=True, fastmath=False)
-    def _pressure(p: np.ndarray, source: np.ndarray, mask: np.ndarray, x_neighbors: np.ndarray, y_neighbors: np.ndarray,
-                  omega: float, dx2: float, dy2: float, threshold: float, max_iters: int):
+    @njit(parallel=True, fastmath=FASTMATH)
+    def _pressure(p: np.ndarray, source: np.ndarray, mask: np.ndarray, A_diag: np.ndarray, inv_A_diag: np.ndarray,
+                  Ap: np.ndarray, search_dir: np.ndarray, dx2: float, dy2: float, threshold: float, max_iters: int):
+        """Solves the Poisson equation for pressure using Matrix-Free Preconditioned Conjugate Gradient (Jacobi Preconditioner). NOTE: 'source' is mutated in-place and becomes the residual array (r)."""
+        # initialize search direction and compute initial residual
+        rz_old = 0.0
+        for i in prange(2, p.shape[0]-2):
+            for j in range(2, p.shape[1]-2):
+                if mask[i, j]: continue
+                # A * p
+                Ap[i, j] = A_diag[i, j] * p[i, j] - \
+                    (p[i+1, j] + p[i-1, j]) * dy2 - \
+                    (p[i, j+1] + p[i, j-1]) * dx2
+                # r = b - A*p
+                source[i, j] = -source[i, j] - Ap[i, j]
+                # Jacobi preconditioner (M^-1 * r)
+                search_dir[i, j] = inv_A_diag[i, j] * source[i, j]
+                rz_old += source[i, j] * search_dir[i, j]
+        # main CG loop
+        iter_count = 0
+        error = np.inf
+        while iter_count < max_iters:
+            # compute A * search_dir and dot product with search_dir for alpha
+            dir_dot_A = 0.0
+            for i in prange(2, p.shape[0]-2):
+                for j in range(2, p.shape[1]-2):
+                    if mask[i, j]: continue
+                    Ap[i, j] = A_diag[i, j] * search_dir[i, j] \
+                        - (search_dir[i+1, j] + search_dir[i-1, j]) * dy2 \
+                        - (search_dir[i, j+1] + search_dir[i, j-1]) * dx2
+                    dir_dot_A += search_dir[i, j] * Ap[i, j]
+            alpha = rz_old / dir_dot_A
+            # update pressure and residual, calculate new rz and error
+            rz_new = 0.0
+            error = 0.0
+            for i in prange(2, p.shape[0]-2):
+                for j in range(2, p.shape[1]-2):
+                    if mask[i, j]: continue
+                    p[i, j] += alpha * search_dir[i, j]
+                    source[i, j] -= alpha * Ap[i, j]
+                    # apply preconditioner locally again
+                    z_val = inv_A_diag[i, j] * source[i, j]
+                    rz_new += source[i, j] * z_val
+                    error = max(error, abs(z_val)) 
+            # check convergence
+            if error < threshold:
+                break 
+            # calculate beta and update search direction
+            beta = rz_new / rz_old
+            for i in prange(2, p.shape[0]-2):
+                for j in range(2, p.shape[1]-2):
+                    if mask[i, j]: continue
+                    # recompute local z_val one last time for the search direction update
+                    z_val = inv_A_diag[i, j] * source[i, j]
+                    search_dir[i, j] = z_val + beta * search_dir[i, j]
+            rz_old = rz_new
+            iter_count += 1
+        return iter_count, error
+    
+    @staticmethod
+    @njit(parallel=True, fastmath=FASTMATH)
+    def _pressure_SOR(p: np.ndarray, source: np.ndarray, mask: np.ndarray, x_neighbors: np.ndarray, y_neighbors: np.ndarray,
+                      omega: float, dx2: float, dy2: float, threshold: float, max_iters: int):
         """Solves the Poisson equation for pressure using the red-black Successive Over-Relaxation method."""
         # NOTE: updating the error in parallel causes a race condition
         iter_count = 0
@@ -313,18 +321,14 @@ class FD:
         return iter_count, error
     
     @staticmethod
-    @njit(parallel=True, fastmath=False)
-    def _predict(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray, du_prev: np.ndarray, dv_prev: np.ndarray, p: np.ndarray, mask: np.ndarray,
-                 nu: float, dt: float, dx: float, dy: float, dt_over_2rho_dx: float, dt_over_2rho_dy: float, AB: float = 0.5):
-        """Updates the velocity field based on the Navier-Stokes equations using combined third-order upwind scheme. Includes the pressure gradient term for higher accuracy prediction."""
+    @njit(parallel=True, fastmath=FASTMATH)
+    def _predict(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray,
+                 du_prev: np.ndarray, dv_prev: np.ndarray, mask: np.ndarray,
+                 nu: float, dt: float, dx: float, dy: float, AB: float = 0.5):
+        """Updates the velocity field based on the Navier-Stokes equations using combined third-order upwind scheme."""
         for i in prange(2, u.shape[0]-2):
             for j in range(2, u.shape[1]-2):
                 if mask[i, j]: continue # skip points inside the cylinder
-                # Neumann boundary conditions for pressure at cylinder
-                p_E = p[i+1, j] * (1.0 - mask[i+1, j]) + p[i, j] * mask[i+1, j]
-                p_W = p[i-1, j] * (1.0 - mask[i-1, j]) + p[i, j] * mask[i-1, j]
-                p_N = p[i, j+1] * (1.0 - mask[i, j+1]) + p[i, j] * mask[i, j+1]
-                p_S = p[i, j-1] * (1.0 - mask[i, j-1]) + p[i, j] * mask[i, j-1]
                 # combined upwind terms for advection
                 u_adv_dx = (1/12) * ((u[i, j] + abs(u[i, j])) * (2*u[i+1, j] + 3*u[i, j] - 6*u[i-1, j] + u[i-2, j]) \
                     + (u[i, j] - abs(u[i, j])) * (-u[i+2, j] + 6*u[i+1, j] - 3*u[i, j] - 2*u[i-1, j])) * dt/dx
@@ -334,11 +338,11 @@ class FD:
                     + (u[i, j] - abs(u[i, j])) * (-v[i+2, j] + 6*v[i+1, j] - 3*v[i, j] - 2*v[i-1, j])) * dt/dx
                 v_adv_dy = (1/12) * ((v[i, j] + abs(v[i, j])) * (2*v[i, j+1] + 3*v[i, j] - 6*v[i, j-1] + v[i, j-2]) \
                     + (v[i, j] - abs(v[i, j])) * (-v[i, j+2] + 6*v[i, j+1] - 3*v[i, j] - 2*v[i, j-1])) * dt/dy
-                # combined advection, pressure gradient, and diffusion
-                du = - u_adv_dx - u_adv_dy - dt_over_2rho_dx * (p_E - p_W) + nu * dt \
+                # combined advection and diffusion
+                du = - u_adv_dx - u_adv_dy + nu * dt \
                     * ((u[i+1, j] - 2*u[i, j] + u[i-1, j]) / dx**2 \
                     + (u[i, j+1] - 2*u[i, j] + u[i, j-1]) / dy**2)
-                dv = - v_adv_dx - v_adv_dy - dt_over_2rho_dy * (p_N - p_S) + nu * dt \
+                dv = - v_adv_dx - v_adv_dy + nu * dt \
                     * ((v[i+1, j] - 2*v[i, j] + v[i-1, j]) / dx**2 \
                     + (v[i, j+1] - 2*v[i, j] + v[i, j-1]) / dy**2)
                 # use Euler or Adams-Bashforth 2 time-stepping based on whether it's the first step or not
@@ -349,17 +353,13 @@ class FD:
 
     @staticmethod
     @njit(parallel=True, fastmath=False)
-    def _predict_FL(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray, du_prev: np.ndarray, dv_prev: np.ndarray, p: np.ndarray, mask: np.ndarray,
-                    nu: float, dt: float, dx: float, dy: float, dt_over_2rho_dx: float, dt_over_2rho_dy: float, AB: float = 0.5):
-        """Updates the velocity field based on the Navier-Stokes equations using combined upwind scheme. Includes the pressure gradient term for higher accuracy prediction. Dynamically switches between first-order and third-order upwind based on whether the third-order points are inside the cylinder or not as an attempt to limit flux instabilities while maintaining higher-order accuracy where possible."""
+    def _predict_FL(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray,
+                    du_prev: np.ndarray, dv_prev: np.ndarray, mask: np.ndarray,
+                    nu: float, dt: float, dx: float, dy: float, AB: float = 0.5):
+        """Updates the velocity field based on the Navier-Stokes equations using combined upwind scheme. Dynamically switches between first-order and third-order upwind based on whether the third-order points are inside the cylinder or not as an attempt to limit flux instabilities while maintaining higher-order accuracy where possible."""
         for i in prange(2, u.shape[0]-2):
             for j in range(2, u.shape[1]-2):
                 if mask[i, j]: continue # skip points inside the cylinder
-                # Neumann boundary conditions for pressure at cylinder
-                p_E = p[i+1, j] * (1.0 - mask[i+1, j]) + p[i, j] * mask[i+1, j]
-                p_W = p[i-1, j] * (1.0 - mask[i-1, j]) + p[i, j] * mask[i-1, j]
-                p_N = p[i, j+1] * (1.0 - mask[i, j+1]) + p[i, j] * mask[i, j+1]
-                p_S = p[i, j-1] * (1.0 - mask[i, j-1]) + p[i, j] * mask[i, j-1]
                 # check if any of third-order points are inside the mask
                 safe_E = (1-mask[i+1, j]) * (1-mask[i-1, j]) * (1-mask[i-2, j])
                 safe_W = (1-mask[i-1, j]) * (1-mask[i+1, j]) * (1-mask[i+2, j])
@@ -397,11 +397,11 @@ class FD:
                 u_adv_dy = 0.5 * ((v[i, j] + abs(v[i, j])) * u_N + (v[i, j] - abs(v[i, j])) * u_S) * dt/dy
                 v_adv_dx = 0.5 * ((u[i, j] + abs(u[i, j])) * v_E + (u[i, j] - abs(u[i, j])) * v_W) * dt/dx
                 v_adv_dy = 0.5 * ((v[i, j] + abs(v[i, j])) * v_N + (v[i, j] - abs(v[i, j])) * v_S) * dt/dy
-                # combined advection, pressure gradient, and diffusion
-                du = - u_adv_dx - u_adv_dy - dt_over_2rho_dx * (p_E - p_W) + nu * dt \
+                # combined advection and diffusion
+                du = - u_adv_dx - u_adv_dy + nu * dt \
                     * ((u[i+1, j] - 2*u[i, j] + u[i-1, j]) / dx**2 \
                     + (u[i, j+1] - 2*u[i, j] + u[i, j-1]) / dy**2)
-                dv = - v_adv_dx - v_adv_dy - dt_over_2rho_dy * (p_N - p_S) + nu * dt \
+                dv = - v_adv_dx - v_adv_dy + nu * dt \
                     * ((v[i+1, j] - 2*v[i, j] + v[i-1, j]) / dx**2 \
                     + (v[i, j+1] - 2*v[i, j] + v[i, j-1]) / dy**2)
                 # use Euler or Adams-Bashforth 2 time-stepping based on whether it's the first step or not
@@ -411,7 +411,7 @@ class FD:
                 dv_prev[i, j] = dv
 
     @staticmethod
-    @njit(parallel=True, fastmath=False)
+    @njit(parallel=True, fastmath=FASTMATH)
     def _correct(u: np.ndarray, v: np.ndarray, p: np.ndarray, mask: np.ndarray,
                  dt_over_2rho_dx: float, dt_over_2rho_dy: float):
         """Corrects the velocity field based on the pressure gradient."""
@@ -426,44 +426,46 @@ class FD:
                 u[i, j] -= dt_over_2rho_dx * (p_E - p_W)
                 v[i, j] -= dt_over_2rho_dy * (p_N - p_S)
 
-class benchmark(FD):
-    def benchmark_P2(self, time: float, limit_flux: bool = False, p_threshold: float = 1e-4, p_max_iters: int = 1000,
-                     show: bool = False, save: bool = False, filename: str|None = None):
+    def benchmark(self, time: float, p_threshold: float = 1e-4, p_max_iters: int = 1000,
+                  show: bool = False, save: bool = False, filename: str|None = None):
         import timeit
-        if limit_flux:
-            predict = self._predict_FL
-        else:
-            predict = self._predict
+        # pre-allocate arrays for the solver to avoid repeated allocations inside the loop
         source = np.zeros_like(self.p)
+        Ap = np.zeros_like(self.p)
+        search_dir = np.zeros_like(self.p)
         dp = np.zeros_like(self.p)
         u_next = self.u.copy()
         v_next = self.v.copy()
         du_prev = np.zeros_like(self.u)
         dv_prev = np.zeros_like(self.v)
         n_iters = int(time / self.dt)
-        rho_dx2_dy2_over_dt = (self.rho * self.dx**2 * self.dy**2) / self.dt
-        inv_2dx, inv_2dy = 1 / (2*self.dx), 1 / (2*self.dy)
+        # precompute constant coefficients for the source term and pressure solver to optimize performance
+        half_rho_dx2_dy2_over_dt = 0.5 * (self.rho * self.dx**2 * self.dy**2) / self.dt
         dx2, dy2 = self.dx**2, self.dy**2
         dt_over_2rho_dx = self.dt / (2 * self.rho * self.dx)
         dt_over_2rho_dy = self.dt / (2 * self.rho * self.dy)
         # ----- initial step to time JIT compilation -----
         # perform source once
         start = timeit.default_timer()
-        self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
+        self._source(source, self.u, self.v, self.mask, half_rho_dx2_dy2_over_dt, self.dx, self.dy)
         end = timeit.default_timer()
         print(f"Initial source term computation took {end - start:.4f} seconds.")
         # perform pressure solve once
         start = timeit.default_timer()
-        iter_count, _ = self._pressure(self.p, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                        self.omega, dx2, dy2, p_threshold, 10000)
+        iter_count, _ = self._pressure(self.p, source, self.mask, self.A_diag, self.inv_A_diag,
+                                       Ap, search_dir, dx2, dy2, p_threshold, p_max_iters)
         end = timeit.default_timer()
         print(f"Initial pressure solve took {end - start:.4f} seconds with {iter_count} iterations.")
         # perform prediction step to get intermediate velocity field
         start = timeit.default_timer()
-        predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.p, self.mask,
-                self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy, AB=0.0)
+        self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                      self.nu, self.dt, self.dx, self.dy, AB=0.0)
         end = timeit.default_timer()
         print(f"Initial prediction step took {end - start:.4f} seconds.")
+        start = timeit.default_timer()
+        self._correct(u_next, v_next, self.p, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
+        end = timeit.default_timer()
+        print(f"Initial correction step took {end - start:.4f} seconds.")
         self.u, u_next = u_next, self.u
         self.v, v_next = v_next, self.v
         # enforce outflow boundary conditions
@@ -471,14 +473,14 @@ class benchmark(FD):
         self.v[-2:, :] = self.v[-3, :]
         # compute source term for pressure Poisson equation
         start = timeit.default_timer()
-        self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
+        self._source(source, self.u, self.v, self.mask, half_rho_dx2_dy2_over_dt, self.dx, self.dy)
         end = timeit.default_timer()
         print(f"Initial source term computation took {end - start:.4f} seconds.")
         # solve for pressure and correct velocity field
         dp.fill(0.0) # reset pressure correction array
         start = timeit.default_timer()
-        iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                        self.omega, dx2, dy2, p_threshold, 10000)
+        iter_count, _ = self._pressure(dp, source, self.mask, self.A_diag, self.inv_A_diag,
+                                       Ap, search_dir, dx2, dy2, p_threshold, p_max_iters)
         end = timeit.default_timer()
         print(f"Initial pressure solve took {end - start:.4f} seconds with {iter_count} iterations.")
         self.p += dp # accumulate pressure corrections for better prediction
@@ -502,10 +504,14 @@ class benchmark(FD):
         for n in range(n_iters-1):
             # perform prediction step to get intermediate velocity field
             start = timeit.default_timer()
-            predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.p, self.mask,
-                    self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy, AB=0.0)
+            self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                          self.nu, self.dt, self.dx, self.dy)
             end = timeit.default_timer()
             times[n, 0] = end - start
+            start = timeit.default_timer()
+            self._correct(u_next, v_next, self.p, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
+            end = timeit.default_timer()
+            times[n, 3] = end - start
             self.u, u_next = u_next, self.u
             self.v, v_next = v_next, self.v
             # enforce outflow boundary conditions
@@ -513,14 +519,14 @@ class benchmark(FD):
             self.v[-2:, :] = self.v[-3, :]
             # compute source term for pressure Poisson equation
             start = timeit.default_timer()
-            self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
+            self._source(source, self.u, self.v, self.mask, half_rho_dx2_dy2_over_dt, self.dx, self.dy)
             end = timeit.default_timer()
             times[n, 1] = end - start
             # solve for pressure and correct velocity field
             dp.fill(0.0) # reset pressure correction array
             start = timeit.default_timer()
-            iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                           self.omega, dx2, dy2, p_threshold, p_max_iters)
+            iter_count, _ = self._pressure(dp, source, self.mask, self.A_diag, self.inv_A_diag,
+                                           Ap, search_dir, dx2, dy2, p_threshold, p_max_iters)
             end = timeit.default_timer()
             times[n, 2] = end - start
             iters[n] = iter_count
@@ -528,129 +534,11 @@ class benchmark(FD):
             start = timeit.default_timer()
             self._correct(self.u, self.v, dp, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
             end = timeit.default_timer()
-            times[n, 3] = end - start
+            times[n, 3] += end - start
             # enforce outflow boundary conditions again after correction
             self.u[-2:, :] = self.u[-3, :]
             self.v[-2:, :] = self.v[-3, :]
-            div_history[n] = self._check_divergence(self.u, self.v, self.mask, inv_2dx, inv_2dy)
-            # check CFL condition for stability
-            CFL = (max(np.max(self.u), np.max(self.v)) * self.dt) / min(self.dx, self.dy)
-            if CFL >= 1:
-                warn(f"CFL condition violated: {CFL:.2f} >= 1. Consider reducing dt or increasing dx/dy for stability.")
-            if CFL >= 10:
-                raise RuntimeError(f"CFL condition severely violated: {CFL:.2f} >> 1. Simulation is likely diverging. Consider significantly reducing dt or increasing dx/dy for stability.")
-        self._benchmark_data(times, iters, div_history, n_iters, p_max_iters, show=show, save=save, filename=filename)
-
-    def benchmark_P3(self, time: float, limit_flux: bool, p_threshold: float = 1e-4, p_max_iters: int = 1000,
-                     show: bool = False, save: bool = False, filename: str|None = None):
-        import timeit
-        if limit_flux:
-            predict = self._predict_FL
-        else:
-            predict = self._predict
-        source = np.zeros_like(self.p)
-        p_next = self.p.copy()
-        dp = np.zeros_like(self.p)
-        u_next = self.u.copy()
-        v_next = self.v.copy()
-        du_prev = np.zeros_like(self.u)
-        dv_prev = np.zeros_like(self.v)
-        n_iters = int(time / self.dt)
-        rho_dx2_dy2_over_dt = (self.rho * self.dx**2 * self.dy**2) / self.dt
-        inv_2dx, inv_2dy = 1 / (2*self.dx), 1 / (2*self.dy)
-        dx2, dy2 = self.dx**2, self.dy**2
-        dt_over_2rho_dx = self.dt / (2 * self.rho * self.dx)
-        dt_over_2rho_dy = self.dt / (2 * self.rho * self.dy)
-        # ----- initial step to time JIT compilation -----
-        # perform source once
-        start = timeit.default_timer()
-        self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
-        end = timeit.default_timer()
-        print(f"Initial source term computation took {end - start:.4f} seconds.")
-        # perform pressure solve once
-        start = timeit.default_timer()
-        iter_count, _ = self._pressure(self.p, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                        self.omega, dx2, dy2, p_threshold, 10000)
-        end = timeit.default_timer()
-        print(f"Initial pressure solve took {end - start:.4f} seconds with {iter_count} iterations.")
-        # perform prediction step to get intermediate velocity field
-        start = timeit.default_timer()
-        predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.p, self.mask,
-                self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy, AB=0.0)
-        end = timeit.default_timer()
-        print(f"Initial prediction step took {end - start:.4f} seconds.")
-        self.u, u_next = u_next, self.u
-        self.v, v_next = v_next, self.v
-        # enforce outflow boundary conditions
-        self.u[-2:, :] = self.u[-3, :]
-        self.v[-2:, :] = self.v[-3, :]
-        # compute source term for pressure Poisson equation
-        start = timeit.default_timer()
-        self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
-        end = timeit.default_timer()
-        print(f"Initial source term computation took {end - start:.4f} seconds.")
-        # solve for pressure and correct velocity field
-        dp.fill(0.0) # reset pressure correction array
-        start = timeit.default_timer()
-        iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                        self.omega, dx2, dy2, p_threshold, 10000)
-        end = timeit.default_timer()
-        print(f"Initial pressure solve took {end - start:.4f} seconds with {iter_count} iterations.")
-        start = timeit.default_timer()
-        self._correct(self.u, self.v, dp, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
-        end = timeit.default_timer()
-        print(f"Initial correction step took {end - start:.4f} seconds.")
-        p_next = self.p + 2 * dp # extrapolate pressure for better prediction (equivalent to 2 * p_new - 1 * p_old)
-        self.p += dp # accumulate pressure corrections for better prediction
-        # enforce outflow boundary conditions again after correction
-        self.u[-2:, :] = self.u[-3, :]
-        self.v[-2:, :] = self.v[-3, :]
-        # check CFL condition for stability
-        CFL = (max(np.max(self.u), np.max(self.v)) * self.dt) / min(self.dx, self.dy)
-        if CFL >= 1:
-            warn(f"CFL condition violated: {CFL:.2f} >= 1. Consider reducing dt or increasing dx/dy for stability.")
-        if CFL >= 10:
-            raise RuntimeError(f"CFL condition severely violated: {CFL:.2f} >> 1. Simulation is likely diverging. Consider significantly reducing dt or increasing dx/dy for stability.")
-        # ----- benchmark loop -----
-        times = np.zeros((n_iters-1, 4))
-        iters = np.zeros(n_iters-1, dtype=int)
-        div_history = np.zeros(n_iters-1)
-        for n in range(n_iters-1):
-            # perform prediction step to get intermediate velocity field
-            start = timeit.default_timer()
-            predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, p_next, self.mask,
-                    self.nu, self.dt, self.dx, self.dy, dt_over_2rho_dx, dt_over_2rho_dy)
-            end = timeit.default_timer()
-            times[n, 0] = end - start
-            self.u, u_next = u_next, self.u
-            self.v, v_next = v_next, self.v
-            # enforce outflow boundary conditions
-            self.u[-2:, :] = self.u[-3, :]
-            self.v[-2:, :] = self.v[-3, :]
-            # compute source term for pressure Poisson equation
-            start = timeit.default_timer()
-            self._source(source, self.u, self.v, self.mask, rho_dx2_dy2_over_dt, inv_2dx, inv_2dy)
-            end = timeit.default_timer()
-            times[n, 1] = end - start
-            # solve for pressure and correct velocity field
-            dp.fill(0.0) # reset pressure correction array
-            start = timeit.default_timer()
-            iter_count, _ = self._pressure(dp, source, self.mask, self.x_neighbors, self.y_neighbors,
-                                           self.omega, dx2, dy2, p_threshold, p_max_iters)
-            end = timeit.default_timer()
-            times[n, 2] = end - start
-            iters[n] = iter_count
-            start = timeit.default_timer()
-            self._correct(self.u, self.v, dp, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
-            end = timeit.default_timer()
-            times[n, 3] = end - start
-            dp += p_next # accumulate pressure corrections for better prediction in next iteration (p_new = p_next + dp) 
-            p_next = 2.0 * dp - self.p # extrapolate pressure for better prediction (equivalent to 2 * p_new - 1 * p_old)
-            self.p[:] = dp # assign the new pressure to be used as the old pressure in the next iteration
-            # enforce outflow boundary conditions again after correction
-            self.u[-2:, :] = self.u[-3, :]
-            self.v[-2:, :] = self.v[-3, :]
-            div_history[n] = self._check_divergence(self.u, self.v, self.mask, inv_2dx, inv_2dy)
+            div_history[n] = self._check_divergence(self.u, self.v, self.mask, self.dx, self.dy)
             # check CFL condition for stability
             CFL = (max(np.max(self.u), np.max(self.v)) * self.dt) / min(self.dx, self.dy)
             if CFL >= 1:
@@ -699,9 +587,9 @@ class benchmark(FD):
             plt.show()
 
     @staticmethod
-    @njit(parallel=True, fastmath=False)
-    def _check_divergence(u: np.ndarray, v: np.ndarray, mask: np.ndarray, 
-                        inv_2dx: float, inv_2dy: float):
+    @njit(parallel=True, fastmath=FASTMATH)
+    def _check_divergence(u: np.ndarray, v: np.ndarray, mask: np.ndarray,
+                          dx: float, dy: float):
         """Calculates the maximum absolute divergence of the velocity field."""
         max_div = 0.0
         # NOTE: parallel reductions for max() are safe in modern Numba, 
@@ -710,7 +598,7 @@ class benchmark(FD):
             for j in range(2, u.shape[1]-2):
                 if mask[i, j]: continue # ignore boundaries and cylinder
                 
-                div = (u[i+1, j] - u[i-1, j]) * inv_2dx + (v[i, j+1] - v[i, j-1]) * inv_2dy
+                div = 0.5 * (u[i+1, j] - u[i-1, j]) / dx + 0.5 * (v[i, j+1] - v[i, j-1]) / dy
                 # Track the worst offending cell in the grid
                 max_div = max(max_div, abs(div))
         return max_div

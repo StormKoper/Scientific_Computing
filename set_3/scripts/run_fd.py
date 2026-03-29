@@ -13,8 +13,6 @@ def parse_args():
     sim.add_argument("--nu", type=float, default=0.001, help="Kinematic viscosity")
     solve = parser.add_argument_group(title="Solver Parameters")
     solve.add_argument("--time", type=float, default=5.0, help="Total simulation time")
-    solve.add_argument("--P", type=int, default=2, choices=[0, 1, 2], help="Pressure solver order (0, 1, or 2)")
-    solve.add_argument("--order", type=int, default=3, choices=[0, 1, 3], help="Advection term upwind order (0, 1, or 3)")
     output = parser.add_argument_group(title="Output Options")
     output.add_argument("--warmup", type=float, default=0, help="Time for warm-up simulation (0 to disable)")
     output.add_argument("--probe", type=int, default=0, help="Strouhal number probe data collection frequency (0 to disable)")
@@ -25,10 +23,10 @@ if __name__ == "__main__":
     fd = FD(dx=args.dx, dy=args.dy, dt=args.dt, rho=args.rho, nu=args.nu)
     if args.warmup:
         print(f"Running warm-up simulation for {args.warmup} seconds...")
-        fd.run(time=args.warmup, P=args.P, order=args.order)
+        fd.run(time=args.warmup)
     print(f"Running main simulation for {args.time} seconds...")
-    fd.run(time=args.time, P=args.P, order=args.order, probe=args.probe)
-    filename = f"FD_P{args.P}_order{args.order}_{str(datetime.now()).replace(' ', '_').replace(':', '-')}.png"
+    fd.run(time=args.time, probe=args.probe)
+    filename = f"FD_{str(datetime.now()).replace(' ', '_').replace(':', '-')}.png"
     print("Plotting the velocity and pressure fields...")
     fd.plot(show=True, save=True, filename="set_3/results/" + filename)
     if args.probe:
