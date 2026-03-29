@@ -46,6 +46,27 @@ This folder contains the code for Assignment Set 2.
     ├── DLA.py                 # Diffusion-Limited Aggregation solvers
     ├── MC_DLA.py              # Monte Carlo routines
     └── RD.py                  # Reaction-Diffusion solvers
+
+# Code for Assignment Set 3
+
+This folder contains the code for Assignment Set 3.
+
+## Structure
+
+```text
+├── figures/                 # Output figures
+├── scripts/                 # Executable scripts to generate plots and run experiments
+│   ├── benchmark_fd.py        # Benchmarking tool for finite difference
+│   ├── run_fd.py              # Scripts running Finite Difference
+│   ├── run_FE.py              # Scripts running Finite Element
+│   ├── run_LB.py              # Scripts running Lattice Boltzman
+│   └── run_LBA.py             # Outdated
+└── utils/                   # Core numerical solvers and helper modules
+    ├── config.py              # Configuring global styles
+    ├── FD.py                  # Finite Difference
+    ├── FE.py                  # Finite Element
+    ├── LB.py                  # Lattice Boltzmann
+    └── WIFI.py                # WiFi-Optimization
 ```
 
 ## Running the Code
@@ -71,9 +92,6 @@ The main entrypoint for set 2 is `scripts/main.py`. Running this file can be exe
 We have also included some tests for this project, which can be run through:
 ```bash
 uv run pytest set_2
-```
-
-└── set_3/                   # Code for Assignment Set 3 (NOT YET IMPLEMENTED) 
 ```
 
 ## Dependency Management
@@ -177,5 +195,31 @@ We have also included some tests for this project, which can be ran through:
 ```bash
 uv run pytest set_2
 ```
+
+</details>
+
+<details>
+<summary><h2>Set 3</h2></summary>
+
+The main entrypoint for set 2 is `main.py`. Running this file can be executed in two ways (Note that if you are not using uv you can replace uv run with python after activating your virtual environment).
+
+### Challenge A: Fluid Dynamics
+* **Generating the Divergence and Strouhal plots**:
+  ```bash
+  uv run -m set_3.scripts.run_fd
+  uv run -m set_3.scripts.run_LB
+  uv run -m set_3.scripts.run_FE
+  ```
+
+### Challenge A: WiFi-Optimization
+* **Performing the raw signal optimisation** (note, the full analysis takes ~40 minutes, choose --analysis 1, to just run shorter version with only 1 optimalisation run.):
+  ```bash
+  uv run -m set_3.utils.WIFI --analysis 5 --raw
+  ```
+
+* **Performing the dB signal optimisation** (note, the full analysis takes ~40 minutes, choose --analysis 1, to just run shorter version with only 1 optimalisation run.):
+  ```bash
+  uv run -m set_3.utils.WIFI --analysis 5
+  ```
 
 </details>
