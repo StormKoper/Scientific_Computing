@@ -4,12 +4,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ..utils.config import *  # noqa: F403
-from ..utils.FD import FD
-
-from warnings import filterwarnings
+from ..utils.LB import LB
 
 def run_validation_sweep():
-    filterwarnings("ignore", category=UserWarning)
     FDIR = Path(__file__).parent.parent / "figures"
     Path.mkdir(FDIR, exist_ok=True)
     target_res = [10, 20, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500]
@@ -24,26 +21,17 @@ def run_validation_sweep():
         print(f"Running simulation for Re = {Re}")
         start_time = time.time()
         nu = U * D / Re
-        fd = FD(dx=.005, dy=.005, dt=.001, rho=1.0, nu=nu)
-        try: fd.run(time=5)
-        except RuntimeError:
-            end_time = time.time()
-            re_arr[i] = Re
-            print(f"    Diverged during warmup for Re={Re}, Time: {end_time - start_time:.2f}s")
-            continue
-        try: fd.run(time=5, probe=5)
-        except RuntimeError:
-            end_time = time.time()
-            re_arr[i] = Re
-            print(f"    Diverged during probe collection for Re={Re}, Time: {end_time - start_time:.2f}s")
-            continue
+        lb = LB(dx=.005, dt=.00005, rho=1.0, nu=nu)
+        lb.run(time=5)
+        lb.run(time=5, probe=100)
         
-        div = fd.max_divergence(fd.u, fd.v, fd.mask, fd.dx, fd.dy)
-        St = fd.strouhal(probe=5)
+        div = lb.max_divergence(lb.u, lb.v, lb.mask, lb.dt)
+        St = lb.strouhal(probe=100)
         
         re_arr[i] = Re
-        div_arr[i] = div
-        st_arr[i] = St
+        if div < 1e3:
+            div_arr[i] = div
+            st_arr[i] = St
         end_time = time.time()
         print(f"    Re: {Re}, Max-Div: {div:.2e}, St: {St:.3f}, Time: {end_time - start_time:.2f}s")
 
@@ -80,8 +68,8 @@ def run_validation_sweep():
     axes[1].set_ylabel("Strouhal Number (St)")
     axes[1].legend(fancybox=True, shadow=True)
 
-    plt.suptitle("Divergence and Strouhal Number for FD implementation")
-    plt.savefig(FDIR / "challenge_A_FD.png", bbox_inches='tight', dpi=300)
+    plt.suptitle("Divergence and Strouhal Number for LB implementation")
+    plt.savefig(FDIR / "challenge_A_LB.png", bbox_inches='tight', dpi=300)
     plt.show()
 
 if __name__ == "__main__":

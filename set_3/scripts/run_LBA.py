@@ -2,7 +2,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 
-from ..utils.LBA import LBA
+from ..utils.LB import LB
 
 
 def compute_divergence_norm(ux, uy, obstacle):
@@ -98,7 +98,7 @@ def find_max_stable_reynolds(
     max_stable_re = np.nan
 
     for re in re_values:
-        solver = LBA(Nx=Nx, Ny=Ny, U_inlet=U_inlet, Re=float(re))
+        solver = LB(Nx=Nx, Ny=Ny, U_inlet=U_inlet, Re=float(re))
         stable = True
 
         for step in range(1, scan_steps + 1):
@@ -179,7 +179,7 @@ def run_validation_sweep(target_res=None, auto_select_re=True):
         print(f"Running LBA simulation for Re = {Re}")
         t0 = time.time()
 
-        solver = LBA(Nx=Nx, Ny=Ny, U_inlet=U_inlet, Re=Re)
+        solver = LB(Nx=Nx, Ny=Ny, U_inlet=U_inlet, Re=Re)
 
         # Probe point downstream of cylinder centerline
         i_probe = min(solver.cx_cyl + 6 * solver.r_cyl, solver.Nx - 2)

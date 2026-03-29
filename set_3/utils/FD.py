@@ -17,21 +17,21 @@ class FD:
         self.nu = nu
         pad = 2 # extra padding for boundary conditions
         # initialize velocity and pressure fields with extra padding for boundary conditions
-        self.nx = round(2.2 // dx + 2*pad) + 1
-        self.ny = round(0.41 // dy + 2*pad) + 1
+        self.nx = round(2.2 / dx + 2*pad) + 1
+        self.ny = round(0.41 / dy + 2*pad) + 1
         self.u = np.zeros(shape=(self.nx, self.ny))
         self.v = np.zeros_like(self.u)
         self.p = np.zeros_like(self.u)
         # set up the inflow and cylinder
-        x_coords = np.pad(np.linspace(0, 2.2, self.nx-2*pad), (pad, pad), mode='edge')
-        y_coords = np.pad(np.linspace(0, 0.41, self.ny-2*pad), (pad, pad), mode='edge')
+        x = np.pad(np.linspace(0, 2.2, self.nx-2*pad), (pad, pad), mode='edge')
+        y = np.pad(np.linspace(0, 0.41, self.ny-2*pad), (pad, pad), mode='edge')
         # parabolic inflow from the left (in line with DFG 2D-2 Benchmark)
         Um = 1.5
         H = 0.41
-        uin_x = 4 * Um * y_coords * (H - y_coords) / (H**2)
-        self.u[:pad, :] = uin_x[None, :]
+        u_in = 4 * Um * y * (H - y) / (H**2)
+        self.u[:pad, :] = u_in[None, :]
         # cylinder mask for no-slip condition
-        X, Y = np.meshgrid(x_coords, y_coords, indexing='ij')
+        X, Y = np.meshgrid(x, y, indexing='ij')
         cx, cy, r = 0.2, 0.2, 0.05
         self.mask = (X - cx)**2 + (Y - cy)**2 <= r**2
         self.u[self.mask] = 0.0
@@ -57,7 +57,6 @@ class FD:
         self.inv_A_diag = np.divide(1.0, self.A_diag, out=np.zeros_like(self.A_diag), where=~self.mask)
         # calculate Reynolds number for reference
         self.Re = 1.0 * 2 * r / nu # Re = U*L/nu with L=diameter=2r and U=2/3 Um = 1.0
-        print(f"Initialized FD solver with Re={self.Re:.2f}, grid size=({self.nx-2*pad}, {self.ny-2*pad}), dt={self.dt:.4f}")
         # set up probes for calculating Strouhal number
         self.probes_x = [int((cx+5*r)/dx)+pad,   int((cx+5*r)/dx)+pad,   int((cx+7*r)/dx)+pad,   int((cx+7*r)/dx)+pad]
         self.probes_y = [int((cy+0.5*r)/dy)+pad, int((cy-0.5*r)/dy)+pad, int((cy+0.5*r)/dy)+pad, int((cy-0.5*r)/dy)+pad]
@@ -74,9 +73,11 @@ class FD:
         du_prev = np.zeros_like(self.u)
         dv_prev = np.zeros_like(self.v)
         n_iters = int(time / self.dt)
-        # precompute constant coefficients for the source term and pressure solver to optimize performance
+        # precompute constant coefficients to optimize performance
         half_rho_dx2_dy2_over_dt = 0.5 * (self.rho * self.dx**2 * self.dy**2) / self.dt
         dx2, dy2 = self.dx**2, self.dy**2
+        nu_dt_over_dx2 = self.nu * self.dt / dx2
+        nu_dt_over_dy2 = self.nu * self.dt / dy2
         dt_over_2rho_dx = self.dt / (2 * self.rho * self.dx)
         dt_over_2rho_dy = self.dt / (2 * self.rho * self.dy)
         # compute initial source
@@ -87,8 +88,8 @@ class FD:
         if iter_count >= p_max_iters:
             warn(f"Maximum iterations reached for pressure solver: {iter_count}")
         # perform prediction step to get intermediate velocity field
-        self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
-                      self.nu, self.dt, self.dx, self.dy, AB=0.0)
+        self._predict_CN(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                         self.dt, self.dx, self.dy, nu_dt_over_dx2, nu_dt_over_dy2, AB=0.0)
         self._correct(u_next, v_next, self.p, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
         self.u, u_next = u_next, self.u
         self.v, v_next = v_next, self.v
@@ -118,8 +119,8 @@ class FD:
             self.strouhal_data["v"].extend(self.v[self.probes_x, self.probes_y])
         for n in tqdm(range(1, n_iters), desc="Running simulation", leave=False, total=n_iters, initial=1):
             # perform prediction step to get intermediate velocity field
-            self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
-                          self.nu, self.dt, self.dx, self.dy)
+            self._predict_CN(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                             self.dt, self.dx, self.dy, nu_dt_over_dx2, nu_dt_over_dy2)
             self._correct(u_next, v_next, self.p, self.mask, dt_over_2rho_dx, dt_over_2rho_dy)
             self.u, u_next = u_next, self.u
             self.v, v_next = v_next, self.v
@@ -167,8 +168,7 @@ class FD:
         if save and filename is not None: plt.savefig(filename, dpi=300)
         if show: plt.show()
     
-    def plot_strouhal(self, probe: int, show=True, save=False, filename=None):
-        import matplotlib.pyplot as plt
+    def strouhal(self, probe: int, show=False, save=False, filename=None) -> float:
         probes = ["Top left", "Bottom left", "Top right", "Bottom right"]
         u_data = np.array(self.strouhal_data["u"]).reshape(-1, 4)
         v_data = np.array(self.strouhal_data["v"]).reshape(-1, 4)
@@ -183,39 +183,39 @@ class FD:
             mags.append(np.abs(fft_vals)[pos_mask])
             f_doms.append(freqs[i][np.argmax(mags[i])])
             strouhals.append(f_doms[i] * 2*0.05 / 1.0) # St = f*L/U with L=diameter=0.1 and U=2/3 Um = 1.0
-            print(f"{probes[i]} probe")
-            print(f"Dominant Shedding Frequency: {f_doms[i]:.2f} Hz")
-            print(f"Calculated Strouhal Number:  {strouhals[i]:.4f}")
-        fig, ax = plt.subplots(3, 1, figsize=(10, 9), constrained_layout=True)
-        fig.suptitle(f"Strouhal Analysis at Probes (every {probe} step{'' if probe == 1 else 's'}), $Re={self.Re:.0f}$")
-        # u-component time series
-        ax[0].plot(u_data)
-        ax[0].set_title("Velocity at Strouhal Probe (u component)")
-        ax[0].set_xlabel("Time (s)")
-        ax[0].set_ylabel("Velocity")
-        ax[0].legend(probes, loc='upper left')
-        ax[0].set_xticks(np.linspace(0, len(u_data)-1, 11), np.round(np.linspace(1, len(u_data), 11) * self.dt * probe, decimals=3))
-        # v-component time series
-        ax[1].plot(v_data)
-        ax[1].set_title("Velocity at Strouhal Probe (v component)")
-        ax[1].set_xlabel("Time (s)")
-        ax[1].set_ylabel("Velocity")
-        ax[1].legend(probes, loc='upper left')
-        ax[1].set_xticks(np.linspace(0, len(v_data)-1, 11), np.round(np.linspace(1, len(v_data), 11) * self.dt * probe, decimals=3))
-        # FFT spectrum of v-component
-        colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
-        for i in range(signal.shape[1]):
-            ax[2].plot(freqs[i], mags[i], label=probes[i], color=colors[i])
-            ax[2].axvline(f_doms[i], color=colors[i], linestyle='--', label=f'Peak: {f_doms[i]:.2f} Hz\nSt: {strouhals[i]:.3f}')
-        ax[2].set_title("Frequency Spectrum (v component, Top Right Probe)")
-        ax[2].set_xlabel("Frequency (Hz)")
-        ax[2].set_ylabel("Magnitude")
-        ax[2].set_xlim(0, max(10, max(f_doms) * 3)) # zoom in on the relevant low-frequency range
-        ax[2].legend()
-        if save and filename is not None:
-            plt.savefig(filename, dpi=300)
-        if show:
-            plt.show()
+        if show or save:
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(3, 1, figsize=(10, 9), constrained_layout=True)
+            fig.suptitle(f"Strouhal Analysis at Probes (every {probe} step{'' if probe == 1 else 's'}), $Re={self.Re:.0f}$")
+            # u-component time series
+            ax[0].plot(u_data)
+            ax[0].set_title("Velocity at Strouhal Probe (u component)")
+            ax[0].set_xlabel("Time (s)")
+            ax[0].set_ylabel("Velocity")
+            ax[0].legend(probes, loc='upper left')
+            ax[0].set_xticks(np.linspace(0, len(u_data)-1, 11), np.round(np.linspace(1, len(u_data), 11) * self.dt * probe, decimals=3))
+            # v-component time series
+            ax[1].plot(v_data)
+            ax[1].set_title("Velocity at Strouhal Probe (v component)")
+            ax[1].set_xlabel("Time (s)")
+            ax[1].set_ylabel("Velocity")
+            ax[1].legend(probes, loc='upper left')
+            ax[1].set_xticks(np.linspace(0, len(v_data)-1, 11), np.round(np.linspace(1, len(v_data), 11) * self.dt * probe, decimals=3))
+            # FFT spectrum of v-component
+            colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+            for i in range(signal.shape[1]):
+                ax[2].plot(freqs[i], mags[i], label=probes[i], color=colors[i])
+                ax[2].axvline(f_doms[i], color=colors[i], linestyle='--', label=f'Peak: {f_doms[i]:.2f} Hz\nSt: {strouhals[i]:.3f}')
+            ax[2].set_title("Frequency Spectrum (v component, Top Right Probe)")
+            ax[2].set_xlabel("Frequency (Hz)")
+            ax[2].set_ylabel("Magnitude")
+            ax[2].set_xlim(0, max(10, max(f_doms) * 3)) # zoom in on the relevant low-frequency range
+            ax[2].legend()
+            if save and filename is not None:
+                plt.savefig(filename, dpi=300)
+            if show:
+                plt.show()
+        return np.mean(strouhals)
 
     @staticmethod
     @njit(parallel=True, fastmath=FASTMATH)
@@ -290,9 +290,8 @@ class FD:
     @staticmethod
     @njit(parallel=True, fastmath=FASTMATH)
     def _pressure_SOR(p: np.ndarray, source: np.ndarray, mask: np.ndarray, x_neighbors: np.ndarray, y_neighbors: np.ndarray,
-                      omega: float, dx2: float, dy2: float, threshold: float, max_iters: int):
+                      dx2: float, dy2: float, omega: float, threshold: float, max_iters: int):
         """Solves the Poisson equation for pressure using the red-black Successive Over-Relaxation method."""
-        # NOTE: updating the error in parallel causes a race condition
         iter_count = 0
         error = np.inf
         while error > threshold and iter_count < max_iters:
@@ -324,8 +323,8 @@ class FD:
     @njit(parallel=True, fastmath=FASTMATH)
     def _predict(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray,
                  du_prev: np.ndarray, dv_prev: np.ndarray, mask: np.ndarray,
-                 nu: float, dt: float, dx: float, dy: float, AB: float = 0.5):
-        """Updates the velocity field based on the Navier-Stokes equations using combined third-order upwind scheme."""
+                 dt: float, dx: float, dy: float, nu_dt_over_dx2: float, nu_dt_over_dy2: float, AB: float = 0.5):
+        """Updates the velocity field based on the Navier-Stokes equations using combined third-order upwind scheme for advection and central difference for diffusion with Adams-Bashforth second order time-stepping."""
         for i in prange(2, u.shape[0]-2):
             for j in range(2, u.shape[1]-2):
                 if mask[i, j]: continue # skip points inside the cylinder
@@ -339,12 +338,12 @@ class FD:
                 v_adv_dy = (1/12) * ((v[i, j] + abs(v[i, j])) * (2*v[i, j+1] + 3*v[i, j] - 6*v[i, j-1] + v[i, j-2]) \
                     + (v[i, j] - abs(v[i, j])) * (-v[i, j+2] + 6*v[i, j+1] - 3*v[i, j] - 2*v[i, j-1])) * dt/dy
                 # combined advection and diffusion
-                du = - u_adv_dx - u_adv_dy + nu * dt \
-                    * ((u[i+1, j] - 2*u[i, j] + u[i-1, j]) / dx**2 \
-                    + (u[i, j+1] - 2*u[i, j] + u[i, j-1]) / dy**2)
-                dv = - v_adv_dx - v_adv_dy + nu * dt \
-                    * ((v[i+1, j] - 2*v[i, j] + v[i-1, j]) / dx**2 \
-                    + (v[i, j+1] - 2*v[i, j] + v[i, j-1]) / dy**2)
+                du = - u_adv_dx - u_adv_dy \
+                    + nu_dt_over_dx2 * (u[i+1, j] - 2*u[i, j] + u[i-1, j]) \
+                    + nu_dt_over_dy2 * (u[i, j+1] - 2*u[i, j] + u[i, j-1])
+                dv = - v_adv_dx - v_adv_dy \
+                    + nu_dt_over_dx2 * (v[i+1, j] - 2*v[i, j] + v[i-1, j]) \
+                    + nu_dt_over_dy2 * (v[i, j+1] - 2*v[i, j] + v[i, j-1])
                 # use Euler or Adams-Bashforth 2 time-stepping based on whether it's the first step or not
                 u_next[i, j] = u[i, j] + (1+AB)*du - AB*du_prev[i, j]
                 v_next[i, j] = v[i, j] + (1+AB)*dv - AB*dv_prev[i, j]
@@ -352,11 +351,86 @@ class FD:
                 dv_prev[i, j] = dv
 
     @staticmethod
+    @njit(parallel=True, fastmath=FASTMATH)
+    def _predict_CN(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray,
+                    du_prev: np.ndarray, dv_prev: np.ndarray, mask: np.ndarray,
+                    dt: float, dx: float, dy: float, nu_dt_over_dx2: float, nu_dt_over_dy2: float, AB: float = 0.5,
+                    omega: float = 1.3, threshold: float = 1e-4, max_iters: int = 500):
+        """Updates the velocity field based on the Navier-Stokes equations using combined third-order upwind scheme for advection and central difference for diffusion with Adams-Bashforth second order time-stepping for advection and Crank-Nicolson for diffusion."""
+        # precompute constant coefficients for the SOR solver
+        for i in prange(2, u.shape[0]-2):
+            for j in range(2, u.shape[1]-2):
+                if mask[i, j]: continue # skip points inside the cylinder
+                # combined upwind terms for advection
+                u_adv_dx = (1/12) * ((u[i, j] + abs(u[i, j])) * (2*u[i+1, j] + 3*u[i, j] - 6*u[i-1, j] + u[i-2, j]) \
+                    + (u[i, j] - abs(u[i, j])) * (-u[i+2, j] + 6*u[i+1, j] - 3*u[i, j] - 2*u[i-1, j])) * dt/dx
+                u_adv_dy = (1/12) * ((v[i, j] + abs(v[i, j])) * (2*u[i, j+1] + 3*u[i, j] - 6*u[i, j-1] + u[i, j-2]) \
+                    + (v[i, j] - abs(v[i, j])) * (-u[i, j+2] + 6*u[i, j+1] - 3*u[i, j] - 2*u[i, j-1])) * dt/dy
+                v_adv_dx = (1/12) * ((u[i, j] + abs(u[i, j])) * (2*v[i+1, j] + 3*v[i, j] - 6*v[i-1, j] + v[i-2, j]) \
+                    + (u[i, j] - abs(u[i, j])) * (-v[i+2, j] + 6*v[i+1, j] - 3*v[i, j] - 2*v[i-1, j])) * dt/dx
+                v_adv_dy = (1/12) * ((v[i, j] + abs(v[i, j])) * (2*v[i, j+1] + 3*v[i, j] - 6*v[i, j-1] + v[i, j-2]) \
+                    + (v[i, j] - abs(v[i, j])) * (-v[i, j+2] + 6*v[i, j+1] - 3*v[i, j] - 2*v[i, j-1])) * dt/dy
+                # AB2 / Euler time-stepping for advection and explicit half-step for diffusion
+                du_adv = - u_adv_dx - u_adv_dy
+                dv_adv = - v_adv_dx - v_adv_dy
+                du_diff = 0.5 * (nu_dt_over_dx2 * (u[i+1, j] - 2*u[i, j] + u[i-1, j]) \
+                                 + nu_dt_over_dy2 * (u[i, j+1] - 2*u[i, j] + u[i, j-1]))
+                dv_diff = 0.5 * (nu_dt_over_dx2 * (v[i+1, j] - 2*v[i, j] + v[i-1, j]) \
+                                 + nu_dt_over_dy2 * (v[i, j+1] - 2*v[i, j] + v[i, j-1]))
+                u_next[i, j] = u[i, j] + (1+AB)*du_adv - AB*du_prev[i, j] + du_diff
+                v_next[i, j] = v[i, j] + (1+AB)*dv_adv - AB*dv_prev[i, j] + dv_diff
+                du_prev[i, j] = du_adv
+                dv_prev[i, j] = dv_adv
+        # copy predicted values into u/v for the implicit diffusion solve
+        for i in prange(2, u.shape[0]-2):
+            for j in range(2, u.shape[1]-2):
+                if mask[i, j]: continue
+                u[i, j] = u_next[i, j]
+                v[i, j] = v_next[i, j]
+        # run SOR iterations to solve for the implicit diffusion step
+        inv_A = 1.0 / (1.0 + nu_dt_over_dx2 + nu_dt_over_dy2)
+        iter_count = 0
+        error = np.inf
+        while error > threshold and iter_count < max_iters:
+            error = 0.0
+            # red points
+            for i in prange(2, u.shape[0]-2):
+                start = 3 - (i % 2)
+                for j in range(start, u.shape[1]-2, 2):
+                    if mask[i, j]: continue
+                    next_u = inv_A * (u[i, j] + 0.5 * (nu_dt_over_dx2 * (u_next[i+1, j] + u_next[i-1, j]) \
+                                                       + nu_dt_over_dy2 * (u_next[i, j+1] + u_next[i, j-1])))
+                    next_u = omega * next_u + (1 - omega) * u_next[i, j]
+                    error = max(error, abs(next_u - u_next[i, j]))
+                    u_next[i, j] = next_u
+                    next_v = inv_A * (v[i, j] + 0.5 * (nu_dt_over_dx2 * (v_next[i+1, j] + v_next[i-1, j]) \
+                                                       + nu_dt_over_dy2 * (v_next[i, j+1] + v_next[i, j-1])))
+                    next_v = omega * next_v + (1 - omega) * v_next[i, j]
+                    error = max(error, abs(next_v - v_next[i, j]))
+                    v_next[i, j] = next_v
+            # black points
+            for i in prange(2, u.shape[0]-2):
+                start = 2 + (i % 2)
+                for j in range(start, u.shape[1]-2, 2):
+                    if mask[i, j]: continue
+                    next_u = inv_A * (u[i, j] + 0.5 * (nu_dt_over_dx2 * (u_next[i+1, j] + u_next[i-1, j]) \
+                                                       + nu_dt_over_dy2 * (u_next[i, j+1] + u_next[i, j-1])))
+                    next_u = omega * next_u + (1 - omega) * u_next[i, j]
+                    error = max(error, abs(next_u - u_next[i, j]))
+                    u_next[i, j] = next_u
+                    next_v = inv_A * (v[i, j] + 0.5 * (nu_dt_over_dx2 * (v_next[i+1, j] + v_next[i-1, j]) \
+                                                       + nu_dt_over_dy2 * (v_next[i, j+1] + v_next[i, j-1])))
+                    next_v = omega * next_v + (1 - omega) * v_next[i, j]
+                    error = max(error, abs(next_v - v_next[i, j]))
+                    v_next[i, j] = next_v
+            iter_count += 1
+
+    @staticmethod
     @njit(parallel=True, fastmath=False)
     def _predict_FL(u: np.ndarray, v: np.ndarray, u_next: np.ndarray, v_next: np.ndarray,
                     du_prev: np.ndarray, dv_prev: np.ndarray, mask: np.ndarray,
-                    nu: float, dt: float, dx: float, dy: float, AB: float = 0.5):
-        """Updates the velocity field based on the Navier-Stokes equations using combined upwind scheme. Dynamically switches between first-order and third-order upwind based on whether the third-order points are inside the cylinder or not as an attempt to limit flux instabilities while maintaining higher-order accuracy where possible."""
+                    dt: float, dx: float, dy: float, nu_dt_over_dx2: float, nu_dt_over_dy2: float, AB: float = 0.5):
+        """Updates the velocity field based on the Navier-Stokes equations using combined third-order upwind scheme for advection and central difference for diffusion with Adams-Bashforth second order time-stepping. Dynamically switches between first-order and third-order upwind based on whether the third-order points are inside the mask."""
         for i in prange(2, u.shape[0]-2):
             for j in range(2, u.shape[1]-2):
                 if mask[i, j]: continue # skip points inside the cylinder
@@ -398,12 +472,12 @@ class FD:
                 v_adv_dx = 0.5 * ((u[i, j] + abs(u[i, j])) * v_E + (u[i, j] - abs(u[i, j])) * v_W) * dt/dx
                 v_adv_dy = 0.5 * ((v[i, j] + abs(v[i, j])) * v_N + (v[i, j] - abs(v[i, j])) * v_S) * dt/dy
                 # combined advection and diffusion
-                du = - u_adv_dx - u_adv_dy + nu * dt \
-                    * ((u[i+1, j] - 2*u[i, j] + u[i-1, j]) / dx**2 \
-                    + (u[i, j+1] - 2*u[i, j] + u[i, j-1]) / dy**2)
-                dv = - v_adv_dx - v_adv_dy + nu * dt \
-                    * ((v[i+1, j] - 2*v[i, j] + v[i-1, j]) / dx**2 \
-                    + (v[i, j+1] - 2*v[i, j] + v[i, j-1]) / dy**2)
+                du = - u_adv_dx - u_adv_dy \
+                    + nu_dt_over_dx2 * (u[i+1, j] - 2*u[i, j] + u[i-1, j]) \
+                    + nu_dt_over_dy2 * (u[i, j+1] - 2*u[i, j] + u[i, j-1])
+                dv = - v_adv_dx - v_adv_dy \
+                    + nu_dt_over_dx2 * (v[i+1, j] - 2*v[i, j] + v[i-1, j]) \
+                    + nu_dt_over_dy2 * (v[i, j+1] - 2*v[i, j] + v[i, j-1])
                 # use Euler or Adams-Bashforth 2 time-stepping based on whether it's the first step or not
                 u_next[i, j] = u[i, j] + (1+AB)*du - AB*du_prev[i, j]
                 v_next[i, j] = v[i, j] + (1+AB)*dv - AB*dv_prev[i, j]
@@ -442,6 +516,8 @@ class FD:
         # precompute constant coefficients for the source term and pressure solver to optimize performance
         half_rho_dx2_dy2_over_dt = 0.5 * (self.rho * self.dx**2 * self.dy**2) / self.dt
         dx2, dy2 = self.dx**2, self.dy**2
+        nu_dt_over_dx2 = self.nu * self.dt / dx2
+        nu_dt_over_dy2 = self.nu * self.dt / dy2
         dt_over_2rho_dx = self.dt / (2 * self.rho * self.dx)
         dt_over_2rho_dy = self.dt / (2 * self.rho * self.dy)
         # ----- initial step to time JIT compilation -----
@@ -458,8 +534,8 @@ class FD:
         print(f"Initial pressure solve took {end - start:.4f} seconds with {iter_count} iterations.")
         # perform prediction step to get intermediate velocity field
         start = timeit.default_timer()
-        self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
-                      self.nu, self.dt, self.dx, self.dy, AB=0.0)
+        self._predict_CN(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                         self.dt, self.dx, self.dy, nu_dt_over_dx2, nu_dt_over_dy2, AB=0.0)
         end = timeit.default_timer()
         print(f"Initial prediction step took {end - start:.4f} seconds.")
         start = timeit.default_timer()
@@ -504,8 +580,8 @@ class FD:
         for n in range(n_iters-1):
             # perform prediction step to get intermediate velocity field
             start = timeit.default_timer()
-            self._predict(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
-                          self.nu, self.dt, self.dx, self.dy)
+            self._predict_CN(self.u, self.v, u_next, v_next, du_prev, dv_prev, self.mask,
+                             self.dt, self.dx, self.dy, nu_dt_over_dx2, nu_dt_over_dy2)
             end = timeit.default_timer()
             times[n, 0] = end - start
             start = timeit.default_timer()
@@ -538,7 +614,7 @@ class FD:
             # enforce outflow boundary conditions again after correction
             self.u[-2:, :] = self.u[-3, :]
             self.v[-2:, :] = self.v[-3, :]
-            div_history[n] = self._check_divergence(self.u, self.v, self.mask, self.dx, self.dy)
+            div_history[n] = self.max_divergence(self.u, self.v, self.mask, self.dx, self.dy)
             # check CFL condition for stability
             CFL = (max(np.max(self.u), np.max(self.v)) * self.dt) / min(self.dx, self.dy)
             if CFL >= 1:
@@ -588,17 +664,14 @@ class FD:
 
     @staticmethod
     @njit(parallel=True, fastmath=FASTMATH)
-    def _check_divergence(u: np.ndarray, v: np.ndarray, mask: np.ndarray,
+    def max_divergence(u: np.ndarray, v: np.ndarray, mask: np.ndarray,
                           dx: float, dy: float):
         """Calculates the maximum absolute divergence of the velocity field."""
         max_div = 0.0
-        # NOTE: parallel reductions for max() are safe in modern Numba, 
-        # but if you get race conditions, remove parallel=True
         for i in prange(2, u.shape[0]-2):
             for j in range(2, u.shape[1]-2):
-                if mask[i, j]: continue # ignore boundaries and cylinder
-                
+                # ignore boundaries and cylinder and immediately adjacent points
+                if mask[i, j] or mask[i+1, j] or mask[i-1, j] or mask[i, j+1] or mask[i, j-1]: continue
                 div = 0.5 * (u[i+1, j] - u[i-1, j]) / dx + 0.5 * (v[i, j+1] - v[i, j-1]) / dy
-                # Track the worst offending cell in the grid
                 max_div = max(max_div, abs(div))
         return max_div
